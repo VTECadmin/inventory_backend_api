@@ -25,6 +25,10 @@ async function bootstrap() {
       transformOptions: { enableImplicitConversion: true },
     }),
   );
+  // Close the app cleanly on SIGTERM/SIGINT (e.g. systemctl restart), so the DB
+  // pool and open connections are released instead of being killed abruptly.
+  app.enableShutdownHooks();
+
   await app.listen(process.env.PORT ?? 3000);
 }
 bootstrap();

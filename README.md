@@ -46,6 +46,11 @@ test/            End-to-end tests
 
 ## Getting started
 
+These steps run the API for **local development** on your own machine. To
+provision a **server**, don't do this by hand — use the one-command
+[`setup.sh`](#first-time-server-setup), which performs all of the below (plus
+Node, PostgreSQL, nginx and the systemd service) automatically.
+
 ### Prerequisites
 
 - Node.js 20+
@@ -103,9 +108,14 @@ npm run test:e2e  # end-to-end tests
 
 ## Migrations
 
-Add a new change as `database/migrations/NNNN_description.sql` (4-digit,
-incrementing), then run `./migrate.sh <database>`. Applied migrations are
-recorded and never run twice.
+A migration is a versioned SQL script that changes the database structure (a new
+table, a new column…), so the schema evolves in a tracked, reproducible way
+instead of by hand.
+
+To make a schema change, add `database/migrations/NNNN_description.sql` (4-digit,
+incrementing) and run `./migrate.sh <database>`. Applied migrations are recorded
+in the `schema_migrations` table and never run twice — so `setup.sh` and
+`deploy.sh` apply any pending ones automatically and safely on every run.
 
 ## Authentication & authorization
 

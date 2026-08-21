@@ -54,15 +54,28 @@ Node, PostgreSQL, nginx and the systemd service) automatically.
 ### Prerequisites
 
 - Node.js 20+
-- PostgreSQL 14+
+- PostgreSQL 14+ (installed and running locally)
 
-### 1. Install dependencies
+### Quick start
+
+```bash
+./scripts/setup-local.sh   # installs deps, creates .env + database, runs migrations
+npm run start:dev
+```
+
+`setup-local.sh` is idempotent (it keeps an existing `.env` and database). The
+steps below describe what it does, in case you prefer to configure things by
+hand.
+
+### Manual setup
+
+#### 1. Install dependencies
 
 ```bash
 npm install
 ```
 
-### 2. Configure the environment
+#### 2. Configure the environment
 
 ```bash
 cp .env.example .env
@@ -83,14 +96,14 @@ cp .env.example .env
 | `COGNITO_CLIENT_ID` | Expected token audience (Cognito app client) | `19hf1ddteog5peadgjvjkt2vn9` |
 | `CORS_ORIGINS` | Comma-separated list of allowed browser origins | dashboard + `localhost` dev ports |
 
-### 3. Create the database and run migrations
+#### 3. Create the database and run migrations
 
 ```bash
 createdb vtec_dashboard
 cd database && ./migrate.sh vtec_dashboard
 ```
 
-### 4. Run the API
+#### 4. Run the API
 
 ```bash
 npm run start:dev     # watch mode

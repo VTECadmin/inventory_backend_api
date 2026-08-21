@@ -21,25 +21,29 @@ APP_DIR="inventory_backend_api"
 
 echo "Deploying '$REF' to $HOST ..."
 
+# The tar stream is the ssh command's stdin (consumed by `tar -x`), so the build
+# steps run as the remote command itself. Remote-evaluated variables are escaped
+# (\$) so they expand on the server, after sourcing .env.
 git archive --format=tar --prefix="$APP_DIR/" "$REF" \
-  | ssh -i "$KEY" "$HOST" "tar -x -C ~/ && bash -s" <<'REMOTE'
+  | ssh -i "$KEY" "$HOST" "
 set -euo pipefail
-cd ~/inventory_backend_api
+tar -x -C ~/
+cd ~/$APP_DIR
 
-echo "› installing dependencies"
+echo '› installing dependencies'
 npm install --no-audit --no-fund
 
-echo "› building"
+echo '› building'
 npm run build
 
-echo "› running migrations"
+echo '› running migrations'
 set -a; . ./.env; set +a
-( cd database && PGHOST="$DB_HOST" PGUSER="$DB_USER" PGPASSWORD="$DB_PASSWORD" ./migrate.sh "$DB_NAME" )
+( cd database && PGHOST=\"\$DB_HOST\" PGUSER=\"\$DB_USER\" PGPASSWORD=\"\$DB_PASSWORD\" ./migrate.sh \"\$DB_NAME\" )
 
-echo "› restarting service"
+echo '› restarting service'
 sudo systemctl restart inventory-api
 sleep 2
 systemctl is-active inventory-api
-REMOTE
+"
 
 echo "Done."

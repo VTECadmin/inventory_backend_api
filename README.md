@@ -46,10 +46,11 @@ test/            End-to-end tests
 
 ## Getting started
 
-These steps run the API for **local development** on your own machine. To
-provision a **server**, don't do this by hand — use the one-command
-[`setup.sh`](#first-time-server-setup), which performs all of the below (plus
-Node, PostgreSQL, nginx and the systemd service) automatically.
+This section runs the API for **local development** on your own machine — the
+[`setup-local.sh`](#quick-start) script does it in one command (see Quick start
+below), or follow the manual steps. To provision a **server** instead, use
+[`setup.sh`](#first-time-server-setup), which does the same plus installs Node,
+PostgreSQL, nginx and the systemd service.
 
 ### Prerequisites
 

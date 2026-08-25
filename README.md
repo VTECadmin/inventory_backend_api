@@ -284,11 +284,36 @@ DB_NAME=inventory DB_USER=inventory APP_PORT=3000 \
 SERVER_NAME=api-inventory.vtecdashboard.com ./scripts/setup.sh
 ```
 
-Once DNS points at the host, enable HTTPS:
+Once DNS points at the host, enable HTTPS — see the next section.
+
+### HTTPS (TLS certificate)
+
+The API uses a free, auto-renewing **Let's Encrypt** certificate, terminated by
+nginx on the instance (there is no load balancer). One-time setup.
+
+Prerequisites: the subdomain resolves to the host, ports 80 and 443 are open, and
+`certbot` is installed (`setup.sh` installs it; otherwise
+`sudo apt-get install -y certbot python3-certbot-nginx`). The nginx site's
+`server_name` must be the domain.
+
+Obtain and install the certificate — certbot edits the nginx config, adds the 443
+server block, and sets up the HTTP→HTTPS redirect:
 
 ```bash
-sudo certbot --nginx -d api-inventory.vtecdashboard.com
+sudo certbot --nginx -d api-inventory.vtecdashboard.com \
+  --agree-tos -m <admin-email> --redirect
 ```
+
+Renewal is automatic (certbot installs a systemd timer). Verify it:
+
+```bash
+systemctl list-timers | grep certbot     # the scheduled renewal
+sudo certbot renew --dry-run              # test renewal without hitting rate limits
+```
+
+The certificate lives under
+`/etc/letsencrypt/live/api-inventory.vtecdashboard.com/` and nginx reloads it
+automatically on renewal.
 
 ### Deployment
 

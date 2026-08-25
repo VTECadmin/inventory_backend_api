@@ -79,9 +79,11 @@ DB_PASSWORD=$(openssl rand -hex 24)
 
 JWT_SECRET=$(openssl rand -hex 32)
 
+# Must match the dashboard environment served (dev shown; for prod use
+# eu-central-1_IQpfGPzmU / 5dotgh0v0rk80uothkdgkml2bj).
 COGNITO_REGION=eu-central-1
-COGNITO_USER_POOL_ID=eu-central-1_6GUhKxiDm
-COGNITO_CLIENT_ID=19hf1ddteog5peadgjvjkt2vn9
+COGNITO_USER_POOL_ID=eu-central-1_fhjuxln2B
+COGNITO_CLIENT_ID=21vatrg53ktubcmaklpaust2e8
 
 CORS_ORIGINS=https://internal.vtecdashboard.com,https://dev-internal.vtecdashboard.com
 EOF

@@ -17,8 +17,8 @@ const GROUP_ROLE: Record<string, Role> = {
 };
 
 const REGION = process.env.COGNITO_REGION ?? 'eu-central-1';
-const POOL_ID = process.env.COGNITO_USER_POOL_ID ?? 'eu-central-1_6GUhKxiDm';
-const CLIENT_ID = process.env.COGNITO_CLIENT_ID ?? '19hf1ddteog5peadgjvjkt2vn9';
+const POOL_ID = process.env.COGNITO_USER_POOL_ID ?? 'eu-central-1_fhjuxln2B';
+const CLIENT_ID = process.env.COGNITO_CLIENT_ID ?? '21vatrg53ktubcmaklpaust2e8';
 const ISSUER = `https://cognito-idp.${REGION}.amazonaws.com/${POOL_ID}`;
 
 interface CognitoPayload {

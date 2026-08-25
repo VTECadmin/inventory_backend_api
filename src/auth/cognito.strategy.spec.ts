@@ -10,7 +10,7 @@ import { UnauthorizedException } from '@nestjs/common';
 import { CognitoStrategy } from './cognito.strategy';
 
 describe('CognitoStrategy', () => {
-  const CLIENT_ID = process.env.COGNITO_CLIENT_ID ?? '19hf1ddteog5peadgjvjkt2vn9';
+  const CLIENT_ID = process.env.COGNITO_CLIENT_ID ?? '21vatrg53ktubcmaklpaust2e8';
   let users: { resolveUserId: jest.Mock };
   let strategy: CognitoStrategy;
 

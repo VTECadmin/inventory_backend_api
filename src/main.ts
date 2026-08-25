@@ -1,3 +1,7 @@
+// Load .env before anything else so modules that read process.env at import
+// time (e.g. the Cognito strategy) see the configured values. In production the
+// systemd unit also injects these; dotenv does not override already-set vars.
+import 'dotenv/config';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { json } from 'express';

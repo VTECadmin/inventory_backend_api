@@ -44,16 +44,20 @@ describe('CognitoStrategy', () => {
   });
 
   it('gives the strongest role when the user is in several groups', async () => {
-    const manager = await strategy.validate(payload({ 'cognito:groups': ['WaferProcessing', 'ProjectManager'] }) as any);
+    const manager = await strategy.validate(payload({ 'cognito:groups': ['WaferProcessing', 'InventoryManager'] }) as any);
     expect(manager.role).toBe('manager');
 
-    const admin = await strategy.validate(payload({ 'cognito:groups': ['DeviceTesting', 'Admin'] }) as any);
+    const admin = await strategy.validate(payload({ 'cognito:groups': ['InventoryManager', 'Admin'] }) as any);
     expect(admin.role).toBe('admin');
   });
 
-  it('defaults to employee when no group maps to a role', async () => {
+  it('defaults to employee for any group other than Admin or InventoryManager', async () => {
     const unknown = await strategy.validate(payload({ 'cognito:groups': ['SomethingElse'] }) as any);
     expect(unknown.role).toBe('employee');
+
+    // Groups that are not the two elevated ones map to employee.
+    const other = await strategy.validate(payload({ 'cognito:groups': ['ProjectManager', 'WaferProcessing'] }) as any);
+    expect(other.role).toBe('employee');
 
     const none = await strategy.validate(payload() as any);
     expect(none.role).toBe('employee');
@@ -61,7 +65,7 @@ describe('CognitoStrategy', () => {
 
   it('accepts an id token (aud instead of client_id)', async () => {
     const user = await strategy.validate(
-      payload({ client_id: undefined, aud: CLIENT_ID, token_use: 'id', 'cognito:groups': ['DeviceTestingManager'] }) as any,
+      payload({ client_id: undefined, aud: CLIENT_ID, token_use: 'id', 'cognito:groups': ['InventoryManager'] }) as any,
     );
     expect(user.role).toBe('manager');
   });

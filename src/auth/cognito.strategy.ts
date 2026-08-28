@@ -6,14 +6,12 @@ import { UsersService } from '../users/users.service';
 
 type Role = 'admin' | 'manager' | 'employee';
 
-// Maps a Cognito group to an application role. A user belonging to several
-// groups receives the strongest role (admin > manager > employee).
+// Maps a Cognito group to an application role. Only Admin and InventoryManager
+// carry an elevated role; every other group (or none) defaults to employee. A
+// user in several groups receives the strongest role (admin > manager > employee).
 const GROUP_ROLE: Record<string, Role> = {
   Admin: 'admin',
-  ProjectManager: 'manager',
-  DeviceTestingManager: 'manager',
-  WaferProcessing: 'employee',
-  DeviceTesting: 'employee',
+  InventoryManager: 'manager',
 };
 
 const REGION = process.env.COGNITO_REGION ?? 'eu-central-1';

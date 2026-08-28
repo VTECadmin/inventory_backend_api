@@ -162,9 +162,8 @@ role; when a user is in several groups the strongest role wins:
 | Cognito group | Application role |
 | --- | --- |
 | `Admin` | `admin` |
-| `ProjectManager`, `DeviceTestingManager` | `manager` |
-| `WaferProcessing`, `DeviceTesting` | `employee` |
-| _(no matching group)_ | `employee` |
+| `InventoryManager` | `manager` |
+| _(any other group, or none)_ | `employee` |
 
 **Just-in-time provisioning** — on first sign-in a user is linked to a local
 record by Cognito `sub`, or by email (back-filling the `cognito_sub` column), or

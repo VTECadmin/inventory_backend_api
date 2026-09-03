@@ -25,6 +25,7 @@ export class InventoryController {
     @Query('search') search?: string,
     @Query('lowStock') lowStock?: string,
     @Query('calibrationDue') calibrationDue?: string,
+    @Query('borrowed') borrowed?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
   ) {
@@ -33,6 +34,7 @@ export class InventoryController {
       search,
       lowStock: lowStock === 'true',
       calibrationDue: calibrationDue === 'true',
+      borrowed: borrowed === 'true',
       page: page ? Number(page) : 1,
       limit: limit ? Number(limit) : 50,
     });
@@ -51,6 +53,11 @@ export class InventoryController {
   @Get('calibration-due/count')
   getCalibrationDueCount() {
     return this.inventoryService.getCalibrationDueCount();
+  }
+
+  @Get('borrowed/count')
+  getBorrowedCount() {
+    return this.inventoryService.getBorrowedCount();
   }
 
   @Get('categories')

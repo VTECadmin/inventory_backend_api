@@ -65,7 +65,28 @@ export class UsersService {
 
   async findAll() {
     return this.db.query(
-      'SELECT id, email, full_name, user_role FROM users ORDER BY full_name',
+      `SELECT u.id, u.email, u.full_name, u.user_role AS role,
+         COALESCE((
+           SELECT json_agg(json_build_object(
+             'item_id', i.id, 'part_id', i.part_id, 'item', i.description,
+             'location', l.name, 'qty', t.qty, 'since', t.created_at
+           ) ORDER BY t.created_at DESC)
+           FROM item_transactions t
+           JOIN items i ON t.item_id = i.id
+           JOIN locations l ON i.location_id = l.id
+           WHERE t.user_id = u.id AND t.action = 'borrow'
+             AND t.status = 'active' AND t.cancelled_at IS NULL
+         ), '[]'::json) AS holdings
+       FROM users u
+       ORDER BY u.full_name`,
+    );
+  }
+
+  /** Basic profile of one user (admin's user-details page). */
+  async findOneBasic(id: number) {
+    return this.db.queryOne(
+      'SELECT id, email, full_name, user_role AS role FROM users WHERE id = $1',
+      [id],
     );
   }
 

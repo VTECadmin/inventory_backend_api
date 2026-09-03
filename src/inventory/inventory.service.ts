@@ -33,9 +33,15 @@ export class InventoryService {
     ...this.extraFields,
   ];
 
-  // An item is low on stock when its available quantity is at or below its
-  // threshold. With no threshold set, we alert only when it is fully out (0).
-  private readonly LOW_STOCK = 'i.qty_available <= COALESCE(i.low_stock_threshold, 0)';
+  // Quantity of this item currently out on an active borrow (transfers included;
+  // takes and breakdowns excluded). Borrowed items are still company stock — they
+  // return on 'return', so they count toward what the company owns.
+  private readonly BORROWED = `COALESCE((SELECT SUM(t.qty) FROM item_transactions t
+    WHERE t.item_id = i.id AND t.action = 'borrow' AND t.status = 'active'), 0)`;
+
+  // An item is low on stock when what the company owns (available + still-borrowed)
+  // is at or below its threshold. With no threshold set, we alert only at 0.
+  private readonly LOW_STOCK = `(i.qty_available + ${this.BORROWED}) <= COALESCE(i.low_stock_threshold, 0)`;
 
   // An item is "calibration due" when it has a next-calibration date and an alert
   // threshold, and the remaining time to that date has dropped to the threshold
@@ -178,8 +184,8 @@ export class InventoryService {
     return { deleted: true, id };
   }
 
-  async findAll(filters: { location?: string; search?: string; lowStock?: boolean; calibrationDue?: boolean; page?: number; limit?: number }) {
-    const { location, search, lowStock, calibrationDue, page = 1, limit = 50 } = filters;
+  async findAll(filters: { location?: string; search?: string; lowStock?: boolean; calibrationDue?: boolean; borrowed?: boolean; page?: number; limit?: number }) {
+    const { location, search, lowStock, calibrationDue, borrowed, page = 1, limit = 50 } = filters;
     const offset = (page - 1) * limit;
 
     const conditions: string[] = [];
@@ -203,6 +209,10 @@ export class InventoryService {
       conditions.push(this.CAL_DUE);
     }
 
+    if (borrowed) {
+      conditions.push(`${this.BORROWED} > 0`);
+    }
+
     const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
     params.push(limit, offset);
@@ -218,6 +228,7 @@ export class InventoryService {
         i.qty_found,
         i.qty_needed,
         i.qty_available,
+        ${this.BORROWED} AS borrowed,
         i.low_stock_threshold,
         (${this.LOW_STOCK}) AS low_stock,
         i.maintenance_next,
@@ -255,9 +266,17 @@ export class InventoryService {
     return { count: Number(row?.count ?? 0) };
   }
 
+  async getBorrowedCount() {
+    const row = await this.db.queryOne<{ count: string }>(
+      `SELECT COUNT(*) AS count FROM items i WHERE ${this.BORROWED} > 0`,
+    );
+    return { count: Number(row?.count ?? 0) };
+  }
+
   async findOne(id: number) {
     return this.db.queryOne(
       `SELECT i.*, c.name AS category, l.name AS location, p.name AS project,
+              ${this.BORROWED} AS borrowed,
               (${this.LOW_STOCK}) AS low_stock,
               (${this.CAL_DUE}) AS calibration_due
        FROM items i

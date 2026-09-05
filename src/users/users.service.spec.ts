@@ -1,6 +1,7 @@
 import { Test } from '@nestjs/testing';
 import { UsersService } from './users.service';
 import { DatabaseService } from '../database/database.service';
+import { CognitoDirectoryService } from './cognito-directory.service';
 
 describe('UsersService.resolveUserId', () => {
   let service: UsersService;
@@ -8,8 +9,13 @@ describe('UsersService.resolveUserId', () => {
 
   beforeEach(async () => {
     db = { query: jest.fn(), queryOne: jest.fn() };
+    const cognito = { listPoolUsers: jest.fn().mockResolvedValue(null) };
     const moduleRef = await Test.createTestingModule({
-      providers: [UsersService, { provide: DatabaseService, useValue: db }],
+      providers: [
+        UsersService,
+        { provide: DatabaseService, useValue: db },
+        { provide: CognitoDirectoryService, useValue: cognito },
+      ],
     }).compile();
     service = moduleRef.get(UsersService);
   });

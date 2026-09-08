@@ -426,19 +426,18 @@ describe('InventoryService', () => {
     });
   });
 
-  describe('deleteItem', () => {
-    it('blocks deletion of an item that has history', async () => {
-      db.queryOne.mockResolvedValueOnce({ '?column?': 1 }); // a transaction exists
-
-      await expect(service.deleteItem(42)).rejects.toBeInstanceOf(BadRequestException);
-    });
-
-    it('deletes an item with no history', async () => {
-      db.queryOne
-        .mockResolvedValueOnce(null)          // no history
-        .mockResolvedValueOnce({ id: 42 });   // DELETE ... RETURNING id
+  describe('deleteItem (archive / soft-delete)', () => {
+    it('archives the item (soft-delete), keeping its history', async () => {
+      db.queryOne.mockResolvedValueOnce({ id: 42 }); // UPDATE ... RETURNING id
 
       await expect(service.deleteItem(42)).resolves.toEqual({ deleted: true, id: 42 });
+      expect(String(db.queryOne.mock.calls[0][0])).toContain('deleted_at = now()');
+    });
+
+    it('throws when the item is missing or already archived', async () => {
+      db.queryOne.mockResolvedValueOnce(null);
+
+      await expect(service.deleteItem(42)).rejects.toBeInstanceOf(NotFoundException);
     });
   });
 });

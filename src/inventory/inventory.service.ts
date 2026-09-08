@@ -174,12 +174,16 @@ export class InventoryService {
     return row;
   }
 
+  /**
+   * Retire an item (soft-delete): it leaves the active inventory but its past
+   * transactions stay valid. Any project assignment is dropped. We mark
+   * deleted_at rather than DELETE so nothing that references the item breaks.
+   */
   async deleteItem(id: number) {
-    // Keep history intact: an item that was ever used cannot be deleted.
-    const used = await this.db.queryOne('SELECT 1 FROM item_transactions WHERE item_id = $1 LIMIT 1', [id]);
-    if (used) throw new BadRequestException('This item has history and cannot be deleted');
-
-    const row = await this.db.queryOne('DELETE FROM items WHERE id = $1 RETURNING id', [id]);
+    const row = await this.db.queryOne<{ id: number }>(
+      'UPDATE items SET deleted_at = now(), project_id = NULL WHERE id = $1 AND deleted_at IS NULL RETURNING id',
+      [id],
+    );
     if (!row) throw new NotFoundException(`Item ${id} not found`);
     return { deleted: true, id };
   }
@@ -198,7 +202,8 @@ export class InventoryService {
     const { location, search, lowStock, calibrationDue, borrowed, sort, order, page = 1, limit = 50 } = filters;
     const offset = (page - 1) * limit;
 
-    const conditions: string[] = [];
+    // Retired (soft-deleted) items never appear in the active list.
+    const conditions: string[] = ['i.deleted_at IS NULL'];
     const params: any[] = [];
 
     if (location) {
@@ -285,21 +290,21 @@ export class InventoryService {
 
   async getLowStockCount() {
     const row = await this.db.queryOne<{ count: string }>(
-      `SELECT COUNT(*) AS count FROM items i WHERE ${this.LOW_STOCK}`,
+      `SELECT COUNT(*) AS count FROM items i WHERE i.deleted_at IS NULL AND ${this.LOW_STOCK}`,
     );
     return { count: Number(row?.count ?? 0) };
   }
 
   async getCalibrationDueCount() {
     const row = await this.db.queryOne<{ count: string }>(
-      `SELECT COUNT(*) AS count FROM items i WHERE ${this.CAL_DUE}`,
+      `SELECT COUNT(*) AS count FROM items i WHERE i.deleted_at IS NULL AND ${this.CAL_DUE}`,
     );
     return { count: Number(row?.count ?? 0) };
   }
 
   async getBorrowedCount() {
     const row = await this.db.queryOne<{ count: string }>(
-      `SELECT COUNT(*) AS count FROM items i WHERE ${this.BORROWED} > 0`,
+      `SELECT COUNT(*) AS count FROM items i WHERE i.deleted_at IS NULL AND ${this.BORROWED} > 0`,
     );
     return { count: Number(row?.count ?? 0) };
   }
@@ -314,7 +319,7 @@ export class InventoryService {
        LEFT JOIN categories c ON i.category_id = c.id
        JOIN      locations  l ON i.location_id = l.id
        LEFT JOIN projects   p ON i.project_id  = p.id
-       WHERE i.id = $1`,
+       WHERE i.id = $1 AND i.deleted_at IS NULL`,
       [id],
     );
   }
@@ -324,7 +329,7 @@ export class InventoryService {
     return this.db.query<{ id: number; location: string; count: string }>(
       `SELECT l.id, l.name AS location, COUNT(i.id) AS count
        FROM locations l
-       LEFT JOIN items i ON i.location_id = l.id
+       LEFT JOIN items i ON i.location_id = l.id AND i.deleted_at IS NULL
        GROUP BY l.id, l.name
        ORDER BY l.name`,
     );
@@ -334,7 +339,7 @@ export class InventoryService {
     return this.db.query(
       `SELECT c.id, c.name, COUNT(i.id) AS count
        FROM categories c
-       LEFT JOIN items i ON i.category_id = c.id
+       LEFT JOIN items i ON i.category_id = c.id AND i.deleted_at IS NULL
        GROUP BY c.id, c.name
        ORDER BY c.name`,
     );
@@ -356,7 +361,7 @@ export class InventoryService {
    */
   async deleteLocation(id: number, force = false, targetLocationId?: number) {
     const used = await this.db.queryOne<{ count: string }>(
-      'SELECT COUNT(*) AS count FROM items WHERE location_id = $1', [id],
+      'SELECT COUNT(*) AS count FROM items WHERE location_id = $1 AND deleted_at IS NULL', [id],
     );
     const inUse = Number(used?.count ?? 0) > 0;
 
@@ -411,7 +416,10 @@ export class InventoryService {
       }
 
       // Every item must have been moved out before we can delete the location.
-      const left = await client.query<{ c: string }>('SELECT COUNT(*) AS c FROM items WHERE location_id = $1', [id]);
+      const left = await client.query<{ c: string }>(
+        'SELECT COUNT(*) AS c FROM items WHERE location_id = $1 AND deleted_at IS NULL',
+        [id],
+      );
       if (Number(left.rows[0].c) > 0) {
         throw new BadRequestException('Every item must be assigned a destination before deleting');
       }
@@ -436,7 +444,10 @@ export class InventoryService {
    * detached (their category becomes null / "uncategorized").
    */
   async deleteCategory(id: number, force = false, targetCategoryId?: number) {
-    const used = await this.db.queryOne('SELECT 1 FROM items WHERE category_id = $1 LIMIT 1', [id]);
+    const used = await this.db.queryOne(
+      'SELECT 1 FROM items WHERE category_id = $1 AND deleted_at IS NULL LIMIT 1',
+      [id],
+    );
 
     if (used && !force) {
       throw new BadRequestException('This category is used by items and cannot be deleted');
@@ -467,7 +478,7 @@ export class InventoryService {
    */
   async exportCsv(filters: { location?: string; search?: string }) {
     const { location, search } = filters;
-    const conditions: string[] = [];
+    const conditions: string[] = ['i.deleted_at IS NULL'];
     const params: any[] = [];
 
     if (location) {
@@ -653,12 +664,15 @@ export class InventoryService {
         //     part_id updates the same item instead of duplicating it.
         //     A name shared by several items is ambiguous → the row is reported.
         let existing = partId
-          ? await this.db.queryOne<{ id: number }>('SELECT id FROM items WHERE part_id = $1', [partId])
+          ? await this.db.queryOne<{ id: number }>(
+              'SELECT id FROM items WHERE part_id = $1 AND deleted_at IS NULL',
+              [partId],
+            )
           : null;
 
         if (!existing) {
           const byName = await this.db.query<{ id: number }>(
-            'SELECT id FROM items WHERE description = $1', [description],
+            'SELECT id FROM items WHERE description = $1 AND deleted_at IS NULL', [description],
           );
           if (byName.length > 1) {
             throw new Error(`several items are named "${description}" — set a Part ID to choose which one`);
@@ -1145,24 +1159,14 @@ export class InventoryService {
     });
   }
 
-  /** Delete several items at once. Items with any transaction history are kept
-   *  (like the single delete) and reported as skipped. */
+  /** Retire (soft-delete) several items at once. History is preserved; any
+   *  project assignment is dropped. Already-retired ids are counted as skipped. */
   async bulkDelete(itemIds: number[]) {
     if (!itemIds?.length) throw new BadRequestException('No items selected');
-    return this.db.transaction(async (client) => {
-      const withHistory = new Set(
-        (
-          await client.query<{ item_id: number }>(
-            'SELECT DISTINCT item_id FROM item_transactions WHERE item_id = ANY($1::int[])',
-            [itemIds],
-          )
-        ).rows.map((r) => r.item_id),
-      );
-      const deletable = itemIds.filter((id) => !withHistory.has(id));
-      if (deletable.length) {
-        await client.query('DELETE FROM items WHERE id = ANY($1::int[])', [deletable]);
-      }
-      return { deleted: deletable.length, skipped: itemIds.length - deletable.length };
-    });
+    const res = await this.db.query<{ id: number }>(
+      'UPDATE items SET deleted_at = now(), project_id = NULL WHERE id = ANY($1::int[]) AND deleted_at IS NULL RETURNING id',
+      [itemIds],
+    );
+    return { deleted: res.length, skipped: itemIds.length - res.length };
   }
 }

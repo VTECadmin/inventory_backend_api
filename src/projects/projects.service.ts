@@ -13,7 +13,7 @@ export class ProjectsService {
               COUNT(i.id) AS item_count
        FROM projects p
        LEFT JOIN users u ON p.created_by = u.id
-       LEFT JOIN items i ON i.project_id = p.id
+       LEFT JOIN items i ON i.project_id = p.id AND i.deleted_at IS NULL
        WHERE p.deleted_at IS NULL
        GROUP BY p.id, p.name, p.status, u.full_name
        ORDER BY p.name`,

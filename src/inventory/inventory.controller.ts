@@ -26,6 +26,8 @@ export class InventoryController {
     @Query('lowStock') lowStock?: string,
     @Query('calibrationDue') calibrationDue?: string,
     @Query('borrowed') borrowed?: string,
+    @Query('sort') sort?: string,
+    @Query('order') order?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
   ) {
@@ -35,6 +37,8 @@ export class InventoryController {
       lowStock: lowStock === 'true',
       calibrationDue: calibrationDue === 'true',
       borrowed: borrowed === 'true',
+      sort,
+      order,
       page: page ? Number(page) : 1,
       limit: limit ? Number(limit) : 50,
     });
@@ -210,5 +214,23 @@ export class InventoryController {
   @Roles('admin', 'manager')
   release(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthUser) {
     return this.inventoryService.releaseFromProject(id, user.id);
+  }
+
+  @Post('bulk/assign-project')
+  @Roles('admin', 'manager')
+  bulkAssign(@Body() body: { itemIds: number[]; projectId: number }, @CurrentUser() user: AuthUser) {
+    return this.inventoryService.bulkAssignProject(body.itemIds, body.projectId, user.id);
+  }
+
+  @Post('bulk/release-project')
+  @Roles('admin', 'manager')
+  bulkRelease(@Body() body: { itemIds: number[] }, @CurrentUser() user: AuthUser) {
+    return this.inventoryService.bulkReleaseProject(body.itemIds, user.id);
+  }
+
+  @Post('bulk/delete')
+  @Roles('admin', 'manager')
+  bulkDelete(@Body() body: { itemIds: number[] }) {
+    return this.inventoryService.bulkDelete(body.itemIds);
   }
 }

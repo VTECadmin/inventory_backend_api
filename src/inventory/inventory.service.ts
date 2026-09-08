@@ -184,8 +184,18 @@ export class InventoryService {
     return { deleted: true, id };
   }
 
-  async findAll(filters: { location?: string; search?: string; lowStock?: boolean; calibrationDue?: boolean; borrowed?: boolean; page?: number; limit?: number }) {
-    const { location, search, lowStock, calibrationDue, borrowed, page = 1, limit = 50 } = filters;
+  async findAll(filters: {
+    location?: string;
+    search?: string;
+    lowStock?: boolean;
+    calibrationDue?: boolean;
+    borrowed?: boolean;
+    sort?: string;
+    order?: string;
+    page?: number;
+    limit?: number;
+  }) {
+    const { location, search, lowStock, calibrationDue, borrowed, sort, order, page = 1, limit = 50 } = filters;
     const offset = (page - 1) * limit;
 
     const conditions: string[] = [];
@@ -198,7 +208,15 @@ export class InventoryService {
 
     if (search) {
       params.push(`%${search}%`);
-      conditions.push(`i.description ILIKE $${params.length}`);
+      // Match across the fields a user would reasonably type: name, part id,
+      // category, sub-location and notes — not just the description.
+      conditions.push(
+        `(i.description ILIKE $${params.length}
+          OR i.part_id ILIKE $${params.length}
+          OR c.name ILIKE $${params.length}
+          OR i.sub_location ILIKE $${params.length}
+          OR COALESCE(i.notes, '') ILIKE $${params.length})`,
+      );
     }
 
     if (lowStock) {
@@ -214,6 +232,19 @@ export class InventoryService {
     }
 
     const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    // Sorting: only whitelisted columns map to SQL (never interpolate raw input).
+    const SORTABLE: Record<string, string> = {
+      description: 'i.description',
+      part_id: 'i.part_id',
+      category: 'c.name',
+      location: 'l.name',
+      available: 'i.qty_available',
+      borrowed: this.BORROWED,
+    };
+    const sortCol = SORTABLE[sort ?? ''] ?? 'i.description';
+    const sortDir = (order ?? 'asc').toLowerCase() === 'desc' ? 'DESC' : 'ASC';
+    const orderBy = `ORDER BY ${sortCol} ${sortDir} NULLS LAST, i.description ASC`;
 
     params.push(limit, offset);
 
@@ -241,7 +272,7 @@ export class InventoryService {
       JOIN      locations  l ON i.location_id = l.id
       LEFT JOIN projects   p ON i.project_id  = p.id
       ${where}
-      ORDER BY i.description
+      ${orderBy}
       LIMIT $${params.length - 1} OFFSET $${params.length}
     `;
 
@@ -1055,6 +1086,83 @@ export class InventoryService {
       );
       await client.query('UPDATE items SET project_id = NULL WHERE id = $1', [itemId]);
       return { item_id: itemId, action: 'release_from_project', project_id: item.project_id };
+    });
+  }
+
+  /** Assign several items to a project at once (all-or-nothing). Items already in
+   *  that project are skipped; each assignment is logged. */
+  async bulkAssignProject(itemIds: number[], projectId: number, userId: number) {
+    if (!itemIds?.length) throw new BadRequestException('No items selected');
+    return this.db.transaction(async (client) => {
+      const project = (
+        await client.query<{ status: string }>(
+          'SELECT status FROM projects WHERE id = $1 AND deleted_at IS NULL',
+          [projectId],
+        )
+      ).rows[0];
+      if (!project) throw new NotFoundException('Project not found');
+      if (project.status === 'completed') {
+        throw new BadRequestException('This project is completed; assign to an active project');
+      }
+      const items = (
+        await client.query<{ id: number }>(
+          'SELECT id FROM items WHERE id = ANY($1::int[]) AND project_id IS DISTINCT FROM $2',
+          [itemIds, projectId],
+        )
+      ).rows;
+      for (const it of items) {
+        await client.query('UPDATE items SET project_id = $1 WHERE id = $2', [projectId, it.id]);
+        await client.query(
+          `INSERT INTO item_transactions (item_id, user_id, project_id, action, qty)
+           VALUES ($1, $2, $3, 'assign_to_project', 1)`,
+          [it.id, userId, projectId],
+        );
+      }
+      return { assigned: items.length };
+    });
+  }
+
+  /** Release several items from their projects at once. Items not in a project
+   *  are skipped; each release is logged. */
+  async bulkReleaseProject(itemIds: number[], userId: number) {
+    if (!itemIds?.length) throw new BadRequestException('No items selected');
+    return this.db.transaction(async (client) => {
+      const items = (
+        await client.query<{ id: number; project_id: number }>(
+          'SELECT id, project_id FROM items WHERE id = ANY($1::int[]) AND project_id IS NOT NULL',
+          [itemIds],
+        )
+      ).rows;
+      for (const it of items) {
+        await client.query(
+          `INSERT INTO item_transactions (item_id, user_id, project_id, action, qty)
+           VALUES ($1, $2, $3, 'release_from_project', 1)`,
+          [it.id, userId, it.project_id],
+        );
+        await client.query('UPDATE items SET project_id = NULL WHERE id = $1', [it.id]);
+      }
+      return { released: items.length };
+    });
+  }
+
+  /** Delete several items at once. Items with any transaction history are kept
+   *  (like the single delete) and reported as skipped. */
+  async bulkDelete(itemIds: number[]) {
+    if (!itemIds?.length) throw new BadRequestException('No items selected');
+    return this.db.transaction(async (client) => {
+      const withHistory = new Set(
+        (
+          await client.query<{ item_id: number }>(
+            'SELECT DISTINCT item_id FROM item_transactions WHERE item_id = ANY($1::int[])',
+            [itemIds],
+          )
+        ).rows.map((r) => r.item_id),
+      );
+      const deletable = itemIds.filter((id) => !withHistory.has(id));
+      if (deletable.length) {
+        await client.query('DELETE FROM items WHERE id = ANY($1::int[])', [deletable]);
+      }
+      return { deleted: deletable.length, skipped: itemIds.length - deletable.length };
     });
   }
 }

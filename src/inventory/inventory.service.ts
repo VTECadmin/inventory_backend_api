@@ -188,6 +188,20 @@ export class InventoryService {
     return { deleted: true, id };
   }
 
+  /**
+   * The search WHERE fragment, matching the fields a user would reasonably type:
+   * name, part id, category, sub-location and notes. Shared by the list and the
+   * export so both return the same rows for a given search term. `paramIndex` is
+   * the 1-based index of the already-pushed `%term%` bound parameter.
+   */
+  private searchCondition(paramIndex: number): string {
+    return `(i.description ILIKE $${paramIndex}
+        OR i.part_id ILIKE $${paramIndex}
+        OR c.name ILIKE $${paramIndex}
+        OR i.sub_location ILIKE $${paramIndex}
+        OR COALESCE(i.notes, '') ILIKE $${paramIndex})`;
+  }
+
   async findAll(filters: {
     location?: string;
     search?: string;
@@ -213,15 +227,7 @@ export class InventoryService {
 
     if (search) {
       params.push(`%${search}%`);
-      // Match across the fields a user would reasonably type: name, part id,
-      // category, sub-location and notes — not just the description.
-      conditions.push(
-        `(i.description ILIKE $${params.length}
-          OR i.part_id ILIKE $${params.length}
-          OR c.name ILIKE $${params.length}
-          OR i.sub_location ILIKE $${params.length}
-          OR COALESCE(i.notes, '') ILIKE $${params.length})`,
-      );
+      conditions.push(this.searchCondition(params.length));
     }
 
     if (lowStock) {
@@ -487,7 +493,7 @@ export class InventoryService {
     }
     if (search) {
       params.push(`%${search}%`);
-      conditions.push(`i.description ILIKE $${params.length}`);
+      conditions.push(this.searchCondition(params.length));
     }
     const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 

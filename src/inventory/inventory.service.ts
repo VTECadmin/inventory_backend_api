@@ -797,14 +797,17 @@ export class InventoryService {
       const update = await client.query(
         `UPDATE items
          SET qty_available = qty_available - $1
-         WHERE id = $2 AND qty_available >= $1
+         WHERE id = $2 AND qty_available >= $1 AND deleted_at IS NULL
          RETURNING id, qty_available`,
         [qty, itemId],
       );
 
       if (update.rowCount === 0) {
-        // Either the item does not exist, or not enough stock.
-        const exists = await client.query('SELECT qty_available FROM items WHERE id = $1', [itemId]);
+        // The item is missing/archived, or there is not enough stock.
+        const exists = await client.query(
+          'SELECT qty_available FROM items WHERE id = $1 AND deleted_at IS NULL',
+          [itemId],
+        );
         if (exists.rowCount === 0) throw new NotFoundException(`Item ${itemId} not found`);
         throw new BadRequestException('Not enough quantity available');
       }
@@ -1172,7 +1175,7 @@ export class InventoryService {
 
       const item = (
         await client.query<{ id: number; project_id: number | null }>(
-          'SELECT id, project_id FROM items WHERE id = $1',
+          'SELECT id, project_id FROM items WHERE id = $1 AND deleted_at IS NULL',
           [itemId],
         )
       ).rows[0];
@@ -1230,7 +1233,7 @@ export class InventoryService {
       }
       const items = (
         await client.query<{ id: number }>(
-          'SELECT id FROM items WHERE id = ANY($1::int[]) AND project_id IS DISTINCT FROM $2',
+          'SELECT id FROM items WHERE id = ANY($1::int[]) AND project_id IS DISTINCT FROM $2 AND deleted_at IS NULL',
           [itemIds, projectId],
         )
       ).rows;

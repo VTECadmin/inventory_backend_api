@@ -37,9 +37,19 @@ describe('InventoryService', () => {
       const result = await service.borrow(42, 7, 1);
 
       expect(result).toMatchObject({ item_id: 42, action: 'borrow', qty: 1, qty_available: 9 });
-      // First query is the guarded UPDATE.
+      // First query is the guarded UPDATE — and it excludes archived items.
       expect(client.query.mock.calls[0][0]).toContain('qty_available = qty_available - $1');
       expect(client.query.mock.calls[0][0]).toContain('qty_available >= $1');
+      expect(client.query.mock.calls[0][0]).toContain('deleted_at IS NULL');
+    });
+
+    it('cannot borrow an archived item (treated as not found)', async () => {
+      client.query
+        .mockResolvedValueOnce({ rowCount: 0, rows: [] }) // guarded UPDATE matches nothing (archived)
+        .mockResolvedValueOnce({ rowCount: 0, rows: [] }); // existence check also excludes archived
+
+      await expect(service.borrow(42, 7, 1)).rejects.toBeInstanceOf(NotFoundException);
+      expect(client.query.mock.calls[1][0]).toContain('deleted_at IS NULL');
     });
 
     it('refuses when there is not enough stock', async () => {

@@ -13,6 +13,7 @@ import { NameDto } from './dto/name.dto';
 import { ImportCsvDto } from './dto/import-csv.dto';
 import { AssignProjectDto } from './dto/assign-project.dto';
 import { ReassignDeleteDto } from './dto/reassign-delete.dto';
+import { BulkItemsDto, BulkAssignProjectDto } from './dto/bulk-items.dto';
 
 @Controller('inventory')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -244,19 +245,19 @@ export class InventoryController {
 
   @Post('bulk/assign-project')
   @Roles('admin', 'manager')
-  bulkAssign(@Body() body: { itemIds: number[]; projectId: number }, @CurrentUser() user: AuthUser) {
-    return this.inventoryService.bulkAssignProject(body.itemIds, body.projectId, user.id);
+  bulkAssign(@Body() dto: BulkAssignProjectDto, @CurrentUser() user: AuthUser) {
+    return this.inventoryService.bulkAssignProject(dto.itemIds, dto.projectId, user.id);
   }
 
   @Post('bulk/release-project')
   @Roles('admin', 'manager')
-  bulkRelease(@Body() body: { itemIds: number[] }, @CurrentUser() user: AuthUser) {
-    return this.inventoryService.bulkReleaseProject(body.itemIds, user.id);
+  bulkRelease(@Body() dto: BulkItemsDto, @CurrentUser() user: AuthUser) {
+    return this.inventoryService.bulkReleaseProject(dto.itemIds, user.id);
   }
 
   @Post('bulk/delete')
   @Roles('admin', 'manager')
-  bulkDelete(@Body() body: { itemIds: number[] }) {
-    return this.inventoryService.bulkDelete(body.itemIds);
+  bulkDelete(@Body() dto: BulkItemsDto) {
+    return this.inventoryService.bulkDelete(dto.itemIds);
   }
 }

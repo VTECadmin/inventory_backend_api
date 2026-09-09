@@ -28,11 +28,27 @@ export interface PoolUser {
  * the EC2 instance role. When those calls fail (no IAM, no credentials, offline)
  * it returns null so callers can fall back to the local users table.
  */
+// The pool changes rarely; cache it briefly so we don't call ListUsers (paginated)
+// on every request and risk Cognito rate limits. A failure is cached for a much
+// shorter time so recovery (e.g. IAM finally granted) is picked up quickly.
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 min for a good result
+const FAIL_TTL_MS = 30 * 1000; //      30 s for a failure
+
 @Injectable()
 export class CognitoDirectoryService {
   private readonly logger = new Logger(CognitoDirectoryService.name);
+  private cache: { users: PoolUser[] | null; expires: number } | null = null;
 
   async listPoolUsers(): Promise<PoolUser[] | null> {
+    if (this.cache && Date.now() < this.cache.expires) {
+      return this.cache.users;
+    }
+    const users = await this.fetchPoolUsers();
+    this.cache = { users, expires: Date.now() + (users ? CACHE_TTL_MS : FAIL_TTL_MS) };
+    return users;
+  }
+
+  private async fetchPoolUsers(): Promise<PoolUser[] | null> {
     if (!POOL_ID) return null;
     const client = new CognitoIdentityProviderClient({ region: REGION });
     try {

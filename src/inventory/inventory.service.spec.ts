@@ -1,5 +1,5 @@
 import { Test } from '@nestjs/testing';
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { InventoryService } from './inventory.service';
 import { DatabaseService } from '../database/database.service';
 
@@ -117,41 +117,38 @@ describe('InventoryService', () => {
     });
   });
 
-  describe('transfer', () => {
-    it('closes the sender borrow and opens one for the recipient (total)', async () => {
+  describe('transfer (propose)', () => {
+    it('records a pending transfer without moving the item yet', async () => {
       client.query
         .mockResolvedValueOnce({ rowCount: 1, rows: [{ id: 2 }] })          // recipient exists
         .mockResolvedValueOnce({ rowCount: 1, rows: [{ id: 5, qty: 3 }] })  // sender active borrow
-        .mockResolvedValueOnce({ rows: [] })                                 // close sender borrow
-        .mockResolvedValueOnce({ rows: [{ id: 200 }] })                      // insert transfer row
-        .mockResolvedValueOnce({ rows: [] });                                // insert recipient borrow
+        .mockResolvedValueOnce({ rows: [{ id: 200 }] });                     // insert pending transfer
 
       const result = await service.transfer(3, 7, 2, 3);
 
-      expect(result).toMatchObject({ item_id: 3, action: 'transfer', qty: 3, to_user_id: 2 });
+      expect(result).toMatchObject({ item_id: 3, action: 'transfer', status: 'pending', auto_accepted: false, qty: 3 });
       // The active-borrow lookup ignores rows that were undone/cancelled.
       expect(client.query.mock.calls[1][0]).toContain('cancelled_at IS NULL');
-      // Sender borrow is closed as 'transferred'.
-      expect(client.query.mock.calls[2][0]).toContain("status = 'transferred'");
-      // Total transfer → no remainder borrow (5 calls only).
-      expect(client.query).toHaveBeenCalledTimes(5);
+      // The transfer is inserted with a 'pending' status param; nothing else runs (3 calls only).
+      expect(client.query.mock.calls[2][1][3]).toBe('pending');
+      expect(client.query).toHaveBeenCalledTimes(3);
     });
 
-    it('keeps the remainder as a fresh borrow on a partial transfer', async () => {
+    it('finalizes immediately when the recipient auto-accepts', async () => {
       client.query
-        .mockResolvedValueOnce({ rowCount: 1, rows: [{ id: 2 }] })          // recipient exists
-        .mockResolvedValueOnce({ rowCount: 1, rows: [{ id: 5, qty: 3 }] })  // sender active borrow (3)
+        .mockResolvedValueOnce({ rowCount: 1, rows: [{ id: 2, auto_accept_transfers: true }] }) // recipient auto-accepts
+        .mockResolvedValueOnce({ rowCount: 1, rows: [{ id: 5, qty: 3 }] })  // sender active borrow
+        .mockResolvedValueOnce({ rows: [{ id: 200 }] })                      // insert transfer (transferred)
         .mockResolvedValueOnce({ rows: [] })                                 // close sender borrow
-        .mockResolvedValueOnce({ rows: [{ id: 200 }] })                      // insert transfer row
-        .mockResolvedValueOnce({ rows: [] })                                 // insert recipient borrow (2)
-        .mockResolvedValueOnce({ rows: [] });                                // insert remainder borrow (1)
+        .mockResolvedValueOnce({ rows: [] });                                // open recipient borrow
 
-      await service.transfer(3, 7, 2, 2);
+      const result = await service.transfer(3, 7, 2, 3);
 
-      expect(client.query).toHaveBeenCalledTimes(6);
-      // The remainder borrow is for the sender, qty 1.
-      const remainderParams = client.query.mock.calls[5][1];
-      expect(remainderParams).toEqual([3, 7, 1, 200]);
+      expect(result).toMatchObject({ action: 'transfer', status: 'accepted', auto_accepted: true, qty: 3 });
+      // Transfer row is inserted already 'transferred', the sender borrow is closed, and no remainder here.
+      expect(client.query.mock.calls[2][1][3]).toBe('transferred');
+      expect(client.query.mock.calls[3][0]).toContain("status = 'transferred'");
+      expect(client.query).toHaveBeenCalledTimes(5);
     });
 
     it('refuses transferring to yourself', async () => {
@@ -179,6 +176,40 @@ describe('InventoryService', () => {
       client.query.mockResolvedValueOnce({ rowCount: 0, rows: [] }); // recipient missing
 
       await expect(service.transfer(3, 7, 999, 1)).rejects.toBeInstanceOf(NotFoundException);
+    });
+  });
+
+  describe('acceptTransfer', () => {
+    it('moves the borrow to the recipient and closes the sender borrow', async () => {
+      client.query
+        .mockResolvedValueOnce({
+          rows: [{ id: 200, item_id: 3, user_id: 7, to_user_id: 2, qty: 3, source_tx_id: 5 }],
+        }) // pending transfer
+        .mockResolvedValueOnce({ rows: [{ id: 5, qty: 3, status: 'active' }] }) // sender borrow still active
+        .mockResolvedValueOnce({ rows: [] }) // close sender borrow
+        .mockResolvedValueOnce({ rows: [] }) // mark transfer transferred
+        .mockResolvedValueOnce({ rows: [] }); // open recipient borrow
+
+      await expect(service.acceptTransfer(200, 2)).resolves.toEqual({ accepted: true });
+      expect(client.query.mock.calls[2][0]).toContain("status = 'transferred'");
+    });
+
+    it('refuses when the accepter is not the recipient', async () => {
+      client.query.mockResolvedValueOnce({
+        rows: [{ id: 200, item_id: 3, user_id: 7, to_user_id: 2, qty: 3, source_tx_id: 5 }],
+      });
+
+      await expect(service.acceptTransfer(200, 99)).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('refuses when the sender no longer holds the item', async () => {
+      client.query
+        .mockResolvedValueOnce({
+          rows: [{ id: 200, item_id: 3, user_id: 7, to_user_id: 2, qty: 3, source_tx_id: 5 }],
+        })
+        .mockResolvedValueOnce({ rows: [{ id: 5, qty: 3, status: 'returned' }] }); // borrow no longer active
+
+      await expect(service.acceptTransfer(200, 2)).rejects.toBeInstanceOf(BadRequestException);
     });
   });
 

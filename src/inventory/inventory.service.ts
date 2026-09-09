@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
 import { CreateItemDto } from './dto/create-item.dto';
 import { UpdateItemDto } from './dto/update-item.dto';
@@ -983,64 +983,174 @@ export class InventoryService {
    * logged with the recipient (to_user_id); the borrows it creates point back to
    * it (source_tx_id) so the whole thing can be undone cleanly.
    */
+  /**
+   * Propose a transfer of a borrowed item to another user. This does NOT move the
+   * item yet — it records a 'pending' transfer that the recipient must accept
+   * before the borrow actually changes hands (so nobody is handed responsibility
+   * for equipment without agreeing). The sender keeps the item until then.
+   */
   async transfer(itemId: number, fromUserId: number, toUserId: number, qty: number, notes?: string, borrowId?: number) {
     if (toUserId === fromUserId) {
       throw new BadRequestException('You cannot transfer an item to yourself');
     }
 
     return this.db.transaction(async (client) => {
-      const recipient = await client.query('SELECT id FROM users WHERE id = $1', [toUserId]);
+      const recipient = await client.query('SELECT id, auto_accept_transfers FROM users WHERE id = $1', [toUserId]);
       if (recipient.rowCount === 0) throw new NotFoundException(`User ${toUserId} not found`);
 
-      // The sender must currently have this item out on an active borrow
-      // (a specific one, or the most recent).
+      // The sender must currently have this item out on an active borrow.
       const borrow = await this.findActiveBorrow(client, itemId, fromUserId, borrowId);
       if (borrow.rowCount === 0) {
         throw new BadRequestException('You have no active borrow of this item to transfer');
       }
-
       const borrowed = borrow.rows[0].qty;
       if (qty > borrowed) {
         throw new BadRequestException(`You can transfer at most ${borrowed} (the quantity you borrowed)`);
       }
 
-      // Close the sender's borrow (the stock stays out — no qty_available change).
-      await client.query(`UPDATE item_transactions SET status = 'transferred' WHERE id = $1`, [borrow.rows[0].id]);
+      const autoAccept = recipient.rows[0].auto_accept_transfers === true;
+      const status = autoAccept ? 'transferred' : 'pending';
 
-      // Log the transfer, linked to the borrow it closed.
       const transfer = await client.query<{ id: number }>(
         `INSERT INTO item_transactions (item_id, user_id, to_user_id, action, status, qty, notes, source_tx_id)
-         VALUES ($1, $2, $3, 'transfer', 'transferred', $4, $5, $6)
+         VALUES ($1, $2, $3, 'transfer', $4, $5, $6, $7)
          RETURNING id`,
-        [itemId, fromUserId, toUserId, qty, notes ?? null, borrow.rows[0].id],
+        [itemId, fromUserId, toUserId, status, qty, notes ?? null, borrow.rows[0].id],
       );
-      const transferId = transfer.rows[0].id;
 
+      if (autoAccept) {
+        // The recipient auto-accepts: move the borrow to them right away.
+        await client.query(`UPDATE item_transactions SET status = 'transferred' WHERE id = $1`, [borrow.rows[0].id]);
+        await client.query(
+          `INSERT INTO item_transactions (item_id, user_id, action, status, qty, source_tx_id)
+           VALUES ($1, $2, 'borrow', 'active', $3, $4)`,
+          [itemId, toUserId, qty, transfer.rows[0].id],
+        );
+        const remainder = borrowed - qty;
+        if (remainder > 0) {
+          await client.query(
+            `INSERT INTO item_transactions (item_id, user_id, action, status, qty, source_tx_id)
+             VALUES ($1, $2, 'borrow', 'active', $3, $4)`,
+            [itemId, fromUserId, remainder, transfer.rows[0].id],
+          );
+        }
+      }
+
+      return {
+        transaction_id: transfer.rows[0].id,
+        item_id: itemId,
+        action: 'transfer',
+        status: autoAccept ? 'accepted' : 'pending',
+        auto_accepted: autoAccept,
+        qty,
+      };
+    });
+  }
+
+  /** The user's own "auto-accept transfers" preference. */
+  async getAutoAccept(userId: number) {
+    const row = await this.db.queryOne<{ auto_accept_transfers: boolean }>(
+      'SELECT auto_accept_transfers FROM users WHERE id = $1',
+      [userId],
+    );
+    return { enabled: row?.auto_accept_transfers === true };
+  }
+
+  async setAutoAccept(userId: number, enabled: boolean) {
+    await this.db.query('UPDATE users SET auto_accept_transfers = $1 WHERE id = $2', [!!enabled, userId]);
+
+    // Turning it on also clears anything already waiting on this user: accept
+    // every transfer currently pending for them, right now.
+    let accepted = 0;
+    if (enabled) {
+      const pending = await this.db.query<{ id: number }>(
+        `SELECT id FROM item_transactions
+         WHERE action = 'transfer' AND status = 'pending' AND to_user_id = $1`,
+        [userId],
+      );
+      for (const { id } of pending) {
+        try {
+          await this.acceptTransfer(id, userId);
+          accepted++;
+        } catch {
+          // The sender may no longer hold the item; skip that one and continue.
+        }
+      }
+    }
+    return { enabled: !!enabled, accepted };
+  }
+
+  /** Transfers awaiting the given user's decision (their incoming requests). */
+  async pendingTransfers(userId: number) {
+    return this.db.query(
+      `SELECT t.id, t.item_id, i.description AS item, t.qty, t.notes, t.created_at,
+              u.full_name AS from_user_name
+       FROM item_transactions t
+       JOIN items i ON t.item_id = i.id
+       JOIN users u ON t.user_id = u.id
+       WHERE t.action = 'transfer' AND t.status = 'pending' AND t.to_user_id = $1
+       ORDER BY t.created_at DESC`,
+      [userId],
+    );
+  }
+
+  /** Accept a pending transfer: the borrow actually moves to the recipient now. */
+  async acceptTransfer(transferId: number, userId: number) {
+    return this.db.transaction(async (client) => {
+      const tr = (
+        await client.query(
+          `SELECT id, item_id, user_id, to_user_id, qty, source_tx_id
+           FROM item_transactions WHERE id = $1 AND action = 'transfer' AND status = 'pending'`,
+          [transferId],
+        )
+      ).rows[0];
+      if (!tr) throw new NotFoundException('Transfer request not found or already handled');
+      if (tr.to_user_id !== userId) throw new ForbiddenException('This transfer is not addressed to you');
+
+      // The sender's borrow must still be active (they may have returned it).
+      const borrow = (
+        await client.query(`SELECT id, qty, status FROM item_transactions WHERE id = $1`, [tr.source_tx_id])
+      ).rows[0];
+      if (!borrow || borrow.status !== 'active') {
+        throw new BadRequestException('The sender no longer holds this item');
+      }
+      if (tr.qty > borrow.qty) throw new BadRequestException('That quantity is no longer available');
+
+      await client.query(`UPDATE item_transactions SET status = 'transferred' WHERE id = $1`, [borrow.id]);
+      await client.query(`UPDATE item_transactions SET status = 'transferred' WHERE id = $1`, [transferId]);
       // Open the recipient's borrow (points back to the transfer for undo).
       await client.query(
         `INSERT INTO item_transactions (item_id, user_id, action, status, qty, source_tx_id)
          VALUES ($1, $2, 'borrow', 'active', $3, $4)`,
-        [itemId, toUserId, qty, transferId],
+        [tr.item_id, tr.to_user_id, tr.qty, transferId],
       );
-
-      // Partial transfer: the sender keeps the remainder as a fresh borrow.
-      const remainder = borrowed - qty;
+      // Partial transfer: the sender keeps the remainder.
+      const remainder = borrow.qty - tr.qty;
       if (remainder > 0) {
         await client.query(
           `INSERT INTO item_transactions (item_id, user_id, action, status, qty, source_tx_id)
            VALUES ($1, $2, 'borrow', 'active', $3, $4)`,
-          [itemId, fromUserId, remainder, transferId],
+          [tr.item_id, tr.user_id, remainder, transferId],
         );
       }
-
-      return {
-        transaction_id: transferId,
-        item_id: itemId,
-        action: 'transfer',
-        qty,
-        to_user_id: toUserId,
-      };
+      return { accepted: true };
     });
+  }
+
+  /** Decline a pending transfer (recipient) or cancel it (sender). The item
+   *  simply stays with the sender. */
+  async declineTransfer(transferId: number, userId: number) {
+    const tr = await this.db.queryOne<{ user_id: number; to_user_id: number }>(
+      `SELECT user_id, to_user_id FROM item_transactions
+       WHERE id = $1 AND action = 'transfer' AND status = 'pending'`,
+      [transferId],
+    );
+    if (!tr) throw new NotFoundException('Transfer request not found or already handled');
+    if (tr.to_user_id !== userId && tr.user_id !== userId) {
+      throw new ForbiddenException('This transfer is not yours to decline');
+    }
+    await this.db.query(`UPDATE item_transactions SET status = 'declined' WHERE id = $1`, [transferId]);
+    return { declined: true };
   }
 
   /**

@@ -200,6 +200,32 @@ export class InventoryController {
     return this.inventoryService.transfer(id, user.id, dto.toUserId, dto.qty ?? 1, dto.notes, dto.borrowId);
   }
 
+  // --- Two-step transfers: the recipient accepts/declines a pending transfer ---
+  @Get('transfers/pending')
+  pendingTransfers(@CurrentUser() user: AuthUser) {
+    return this.inventoryService.pendingTransfers(user.id);
+  }
+
+  @Get('transfers/auto-accept')
+  getAutoAccept(@CurrentUser() user: AuthUser) {
+    return this.inventoryService.getAutoAccept(user.id);
+  }
+
+  @Patch('transfers/auto-accept')
+  setAutoAccept(@Body('enabled') enabled: boolean, @CurrentUser() user: AuthUser) {
+    return this.inventoryService.setAutoAccept(user.id, enabled);
+  }
+
+  @Post('transfers/:id/accept')
+  acceptTransfer(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthUser) {
+    return this.inventoryService.acceptTransfer(id, user.id);
+  }
+
+  @Post('transfers/:id/decline')
+  declineTransfer(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthUser) {
+    return this.inventoryService.declineTransfer(id, user.id);
+  }
+
   @Post(':id/assign')
   @Roles('admin', 'manager')
   assign(

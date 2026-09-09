@@ -471,4 +471,32 @@ describe('InventoryService', () => {
       await expect(service.deleteItem(42)).rejects.toBeInstanceOf(NotFoundException);
     });
   });
+
+  describe('findAll (sort whitelist)', () => {
+    it('ignores an unknown / injected sort column and falls back to description', async () => {
+      db.query.mockResolvedValueOnce([]);
+
+      await service.findAll({ sort: 'name); DROP TABLE items;--', order: 'desc' });
+
+      const sql = String(db.query.mock.calls[0][0]);
+      expect(sql).toContain('ORDER BY i.description DESC');
+      expect(sql).not.toContain('DROP TABLE');
+    });
+
+    it('uses a whitelisted column with the requested direction', async () => {
+      db.query.mockResolvedValueOnce([]);
+
+      await service.findAll({ sort: 'available', order: 'desc' });
+
+      expect(String(db.query.mock.calls[0][0])).toContain('ORDER BY i.qty_available DESC');
+    });
+
+    it('defaults to ascending when the order is not "desc"', async () => {
+      db.query.mockResolvedValueOnce([]);
+
+      await service.findAll({ sort: 'location', order: 'sideways' });
+
+      expect(String(db.query.mock.calls[0][0])).toContain('ORDER BY l.name ASC');
+    });
+  });
 });

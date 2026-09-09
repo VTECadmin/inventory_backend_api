@@ -48,3 +48,48 @@ describe('UsersService.resolveUserId', () => {
     expect(String(db.queryOne.mock.calls[2][0])).toContain('INSERT INTO users');
   });
 });
+
+describe('UsersService.directory', () => {
+  let service: UsersService;
+  let db: { query: jest.Mock; queryOne: jest.Mock };
+  let cognito: { listPoolUsers: jest.Mock };
+
+  beforeEach(async () => {
+    db = { query: jest.fn(), queryOne: jest.fn() };
+    cognito = { listPoolUsers: jest.fn() };
+    const moduleRef = await Test.createTestingModule({
+      providers: [
+        UsersService,
+        { provide: DatabaseService, useValue: db },
+        { provide: CognitoDirectoryService, useValue: cognito },
+      ],
+    }).compile();
+    service = moduleRef.get(UsersService);
+  });
+
+  it('lists the Cognito pool, provisioning each and sorting by name', async () => {
+    cognito.listPoolUsers.mockResolvedValue([
+      { sub: 's2', email: 'bob@vtec.com', name: 'Bob', role: 'employee' },
+      { sub: 's1', email: 'alice@vtec.com', name: 'Alice', role: 'admin' },
+    ]);
+    jest.spyOn(service, 'resolveUserId').mockImplementation(async ({ sub }: any) => (sub === 's1' ? 1 : 2));
+
+    const res = await service.directory();
+
+    expect(res).toEqual([
+      { id: 1, full_name: 'Alice' },
+      { id: 2, full_name: 'Bob' },
+    ]);
+    expect(db.query).not.toHaveBeenCalled(); // no local fallback
+  });
+
+  it('falls back to the local users table when Cognito is unavailable', async () => {
+    cognito.listPoolUsers.mockResolvedValue(null);
+    db.query.mockResolvedValueOnce([{ id: 3, full_name: 'Local User' }]);
+
+    const res = await service.directory();
+
+    expect(res).toEqual([{ id: 3, full_name: 'Local User' }]);
+    expect(String(db.query.mock.calls[0][0])).toContain('SELECT id, full_name FROM users');
+  });
+});

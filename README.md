@@ -20,17 +20,31 @@ control. Built with [NestJS](https://nestjs.com/) and PostgreSQL.
 
 - **Inventory** — items with quantities, locations, sub-locations, categories,
   and optional equipment-registry details (serial number, manufacturer, owner,
-  calibration, maintenance, training, purchase/service dates).
-- **Item actions** — take, borrow, return, breakdown and transfer between users,
-  with partial quantities supported.
-- **Projects** — assign items to a project and release them (all or selected).
+  calibration, maintenance, training, purchase/service dates). Extended search
+  (name, part id, category, sub-location, notes), column sorting, and pagination.
+- **Item actions** — take, borrow, return, breakdown, with partial quantities.
+- **Transfers (two-step handshake)** — the sender *proposes* a transfer; the item
+  stays with them until the **recipient accepts** (or declines). Each user has an
+  **auto-accept** preference (finalizes incoming transfers immediately) and may
+  attach an optional **message**.
+- **Archive (soft-delete)** — deleting an item marks it `deleted_at` and hides it
+  from the active list while keeping its history; acquiring actions reject archived
+  items. Same soft-delete for projects.
+- **Projects** — assign items (single or **bulk**), release them (all or selected),
+  rename, mark complete/reopen (completing releases the items), and soft-delete.
+- **Bulk actions** — assign-to-project / release / delete over a validated,
+  size-capped list of item ids.
 - **Transaction history** — every action is recorded and queryable, with
-  pagination and filtering.
+  pagination and filtering; users can undo their own recent actions.
 - **Alerts** — low-stock and calibration-due flags, each with a count endpoint.
 - **Import / export** — bulk create/update from CSV or Excel, covering every
-  column, and export to the same formats.
+  column, and export to the same formats (export honors the same search as the list).
+- **Users** — a directory sourced from the Cognito pool (with graceful fallback),
+  plus `/auth/me` for the signed-in user's profile.
 - **Role-based access** — `admin`, `manager` and `employee` roles enforced
   server-side (employees see their own data; managers and admins see all).
+- **Production hardening** — Cognito-only auth by default (local login opt-in),
+  request rate limiting, security headers, and startup config validation.
 
 ## Tech stack
 
@@ -192,22 +206,27 @@ any signed-in user; employees are scoped to their own data.
 
 | Method | Route | Access |
 | --- | --- | --- |
-| `POST` | `/auth/login` | Public (local JWT fallback) |
+| `POST` | `/auth/login` | Public — rate-limited; local JWT login is opt-in (`ALLOW_LOCAL_LOGIN=1`) |
+| `GET` | `/auth/me` | Authenticated — the signed-in user's profile |
 | `GET` | `/health` | Public |
 
 **Inventory** — `/inventory`
 
 | Method | Route | Access |
 | --- | --- | --- |
-| `GET` | `/inventory` | Authenticated |
+| `GET` | `/inventory` (query: `location`, `search`, `sort`, `order`, `lowStock`, `calibrationDue`, `borrowed`, `page`, `limit`) | Authenticated |
 | `GET` | `/inventory/:id` | Authenticated |
 | `GET` | `/inventory/locations`, `/categories` | Authenticated |
-| `GET` | `/inventory/low-stock/count`, `/calibration-due/count` | Authenticated |
+| `GET` | `/inventory/low-stock/count`, `/calibration-due/count`, `/borrowed/count` | Authenticated |
 | `POST` | `/inventory/:id/take`, `/borrow`, `/return`, `/breakdown`, `/transfer` | Authenticated |
+| `GET` | `/inventory/transfers/pending` | Authenticated (recipient) |
+| `POST` | `/inventory/transfers/:id/accept`, `/decline` | Authenticated (recipient) |
+| `GET` `PATCH` | `/inventory/transfers/auto-accept` | Authenticated |
 | `POST` | `/inventory` (create), `/import` · `GET /inventory/export` | admin · manager |
-| `PATCH` `DELETE` | `/inventory/:id` | admin · manager |
+| `PATCH` `DELETE` | `/inventory/:id` (`DELETE` = archive / soft-delete) | admin · manager |
 | `POST` `DELETE` | `/inventory/locations`, `/categories` (manage) | admin · manager |
 | `POST` | `/inventory/:id/assign`, `/release` | admin · manager |
+| `POST` | `/inventory/bulk/assign-project`, `/release-project`, `/delete` | admin · manager |
 
 **Transactions** — `/transactions`
 
@@ -224,6 +243,8 @@ any signed-in user; employees are scoped to their own data.
 | --- | --- | --- |
 | `GET` | `/projects`, `/projects/:id/items` | Authenticated |
 | `POST` | `/projects`, `/:id/release`, `/:id/release-all` | admin · manager |
+| `PATCH` | `/projects/:id` (rename), `/:id/status` (complete/reopen) | admin · manager |
+| `DELETE` | `/projects/:id` (soft-delete) | admin · manager |
 
 **Users** — `/users`
 

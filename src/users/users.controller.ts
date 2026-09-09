@@ -6,7 +6,7 @@ import { Roles } from '../auth/roles.decorator';
 
 @Controller('users')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('admin')   // user management is admin-only
+@Roles('admin', 'manager')   // the user directory is visible to admins and managers
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 

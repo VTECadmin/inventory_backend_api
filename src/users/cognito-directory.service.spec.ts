@@ -40,6 +40,20 @@ describe('CognitoDirectoryService', () => {
     expect(first).toEqual([expect.objectContaining({ sub: 's1', name: 'Alice' })]);
   });
 
+  it('excludes disabled accounts (they cannot sign in)', async () => {
+    mockSend.mockResolvedValue({
+      Users: [
+        { Username: 'u1', Enabled: true, Attributes: [{ Name: 'sub', Value: 's1' }, { Name: 'name', Value: 'Alice' }] },
+        { Username: 'u2', Enabled: false, Attributes: [{ Name: 'sub', Value: 's2' }, { Name: 'name', Value: 'Bob' }] },
+      ],
+    });
+
+    const users = await service.listPoolUsers();
+
+    expect(users).toEqual([expect.objectContaining({ sub: 's1' })]);
+    expect(users).not.toContainEqual(expect.objectContaining({ sub: 's2' }));
+  });
+
   it('returns null when Cognito is unavailable (degraded mode)', async () => {
     mockSend.mockRejectedValue(new Error('AccessDeniedException'));
     await expect(service.listPoolUsers()).resolves.toBeNull();

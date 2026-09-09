@@ -77,7 +77,12 @@ export class CognitoDirectoryService {
       const res = await client.send(
         new ListUsersCommand({ UserPoolId: POOL_ID, Limit: 60, PaginationToken: token }),
       );
-      for (const u of res.Users ?? []) out.push(this.toPoolUser(u));
+      for (const u of res.Users ?? []) {
+        // Skip disabled accounts: they can't sign in, so they are not valid
+        // team members or transfer recipients.
+        if (u.Enabled === false) continue;
+        out.push(this.toPoolUser(u));
+      }
       token = res.PaginationToken;
     } while (token);
     return out;

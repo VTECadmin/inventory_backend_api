@@ -153,10 +153,32 @@ export class UsersService {
     );
   }
 
-  /** Minimal directory (id + name) any signed-in user can read, e.g. to pick a transfer recipient. */
+  /**
+   * Minimal directory (id + name) any signed-in user can read, e.g. to pick a
+   * transfer recipient. Master list is the whole Cognito pool — the same real
+   * people the Users/Team page shows — so you can transfer to anyone in the
+   * company, not only those who have already used the inventory. Each pool user
+   * is provisioned a local row on the way out (idempotent) so transfers can key
+   * off a stable numeric id. Falls back to the local table when Cognito is
+   * unavailable (no IAM/credentials).
+   */
   async directory() {
-    return this.db.query(
-      'SELECT id, full_name FROM users ORDER BY full_name',
-    );
+    const pool = await this.cognito.listPoolUsers();
+    if (!pool) {
+      return this.db.query('SELECT id, full_name FROM users ORDER BY full_name');
+    }
+    const rows: { id: number; full_name: string }[] = [];
+    for (const p of pool) {
+      const full_name = p.name || p.email;
+      const id = await this.resolveUserId({
+        sub: p.sub,
+        email: p.email,
+        fullName: full_name,
+        role: p.role,
+      });
+      rows.push({ id, full_name });
+    }
+    rows.sort((a, b) => a.full_name.localeCompare(b.full_name));
+    return rows;
   }
 }

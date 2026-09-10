@@ -28,8 +28,8 @@ export class InventoryService {
 
   // part_id is intentionally absent: it's a generated code and cannot be edited.
   private readonly editableColumns = [
-    'description', 'category_id', 'location_id', 'sub_location',
-    'qty_found', 'qty_needed', 'qty_available', 'low_stock_threshold', 'notes',
+    'name', 'category_id', 'location_id', 'sub_location',
+    'qty_found', 'qty_needed', 'qty_available', 'low_stock_threshold', 'description',
     ...this.extraFields,
   ];
 
@@ -111,13 +111,13 @@ export class InventoryService {
     // Core columns + optional equipment-detail columns, built dynamically.
     // part_id is NOT taken from the user: it's a generated, immutable code.
     const values: Record<string, any> = {
-      description: dto.description,
+      name: dto.name,
       category_id: categoryId,
       location_id: locationId,
       sub_location: dto.sub_location ?? null,
       qty_found: dto.qty_found ?? null,
       qty_needed: dto.qty_needed ?? null,
-      notes: dto.notes ?? null,
+      description: dto.description ?? null,
       qty_available: qtyAvailable,
       low_stock_threshold: dto.low_stock_threshold ?? null,
     };
@@ -195,11 +195,11 @@ export class InventoryService {
    * the 1-based index of the already-pushed `%term%` bound parameter.
    */
   private searchCondition(paramIndex: number): string {
-    return `(i.description ILIKE $${paramIndex}
+    return `(i.name ILIKE $${paramIndex}
         OR i.part_id ILIKE $${paramIndex}
         OR c.name ILIKE $${paramIndex}
         OR i.sub_location ILIKE $${paramIndex}
-        OR COALESCE(i.notes, '') ILIKE $${paramIndex})`;
+        OR COALESCE(i.description, '') ILIKE $${paramIndex})`;
   }
 
   async findAll(filters: {
@@ -246,16 +246,16 @@ export class InventoryService {
 
     // Sorting: only whitelisted columns map to SQL (never interpolate raw input).
     const SORTABLE: Record<string, string> = {
-      description: 'i.description',
+      name: 'i.name',
       part_id: 'i.part_id',
       category: 'c.name',
       location: 'l.name',
       available: 'i.qty_available',
       borrowed: this.BORROWED,
     };
-    const sortCol = SORTABLE[sort ?? ''] ?? 'i.description';
+    const sortCol = SORTABLE[sort ?? ''] ?? 'i.name';
     const sortDir = (order ?? 'asc').toLowerCase() === 'desc' ? 'DESC' : 'ASC';
-    const orderBy = `ORDER BY ${sortCol} ${sortDir} NULLS LAST, i.description ASC`;
+    const orderBy = `ORDER BY ${sortCol} ${sortDir} NULLS LAST, i.name ASC`;
 
     params.push(limit, offset);
 
@@ -263,7 +263,7 @@ export class InventoryService {
       SELECT
         i.id,
         i.part_id,
-        i.description,
+        i.name,
         c.name    AS category,
         l.name    AS location,
         i.sub_location,
@@ -275,7 +275,7 @@ export class InventoryService {
         (${this.LOW_STOCK}) AS low_stock,
         i.maintenance_next,
         (${this.CAL_DUE}) AS calibration_due,
-        i.notes,
+        i.description,
         p.name    AS project,
         COUNT(*) OVER() AS _total
       FROM items i
@@ -499,22 +499,22 @@ export class InventoryService {
 
     const extraCols = this.extraFields.map((f) => `i.${f}`).join(', ');
     const rows = await this.db.query<any>(
-      `SELECT i.id, i.part_id, i.description, c.name AS category, l.name AS location,
+      `SELECT i.id, i.part_id, i.name, c.name AS category, l.name AS location,
               i.sub_location, i.qty_found, i.qty_needed, i.qty_available,
-              i.low_stock_threshold, p.name AS project, i.notes, ${extraCols}
+              i.low_stock_threshold, p.name AS project, i.description, ${extraCols}
        FROM items i
        LEFT JOIN categories c ON i.category_id = c.id
        JOIN      locations  l ON i.location_id = l.id
        LEFT JOIN projects   p ON i.project_id  = p.id
        ${where}
-       ORDER BY i.description`,
+       ORDER BY i.name`,
       params,
     );
 
     const columns = [
-      'id', 'part_id', 'description', 'category', 'location',
+      'id', 'part_id', 'name', 'category', 'location',
       'sub_location', 'qty_found', 'qty_needed', 'qty_available',
-      'low_stock_threshold', 'project', 'notes', ...this.extraFields,
+      'low_stock_threshold', 'project', 'description', ...this.extraFields,
     ];
 
     // Wrap a value in quotes only if it contains a comma, quote or newline.
@@ -578,15 +578,15 @@ export class InventoryService {
 
   /**
    * Imports items from CSV text. Recognised columns (header names, any order):
-   * core — description, location, part_id, category, project, sub_location,
-   *   qty_found, qty_needed, qty_available, low_stock_threshold, notes;
+   * core — name, location, part_id, category, project, sub_location,
+   *   qty_found, qty_needed, qty_available, low_stock_threshold, description;
    * equipment — serial_number, manufacturer, manufacturer_contact, owner,
    *   device_status, label_printed, calibration_required, calibration_method,
    *   maintenance_next, maintenance_last, maintenance_freq_months,
    *   calibration_alert_value, calibration_alert_unit, service_provider,
    *   service_provider_contact, training_required, training_material, trainer,
    *   date_of_purchase, date_in_service.
-   * - description and location are required; unknown headers are ignored.
+   * - name and location are required; unknown headers are ignored.
    * - booleans accept yes/no·true/false·1/0; dates are YYYY-MM-DD;
    *   calibration_alert_unit is days/months.
    * - unknown category / location / project names are created on the fly.
@@ -632,9 +632,9 @@ export class InventoryService {
       const r = records[i];
       const rowNo = i + 2; // +1 for header, +1 for 1-based
       try {
-        const description = (r['description'] ?? '').trim();
+        const name = (r['name'] ?? '').trim();
         const location = (r['location'] ?? '').trim();
-        if (!description) throw new Error('description is required');
+        if (!name) throw new Error('name is required');
         if (!location) throw new Error('location is required');
 
         const qtyFound = intOrNull(r['qty_found'], 'qty_found');
@@ -649,7 +649,7 @@ export class InventoryService {
         const projectId = projectName ? await this.resolveProjectId(projectName, userId) : null;
         const partId = (r['part_id'] ?? '').trim() || null;
         const subLocation = (r['sub_location'] ?? '').trim() || null;
-        const notes = (r['notes'] ?? '').trim() || null;
+        const description = (r['description'] ?? '').trim() || null;
         const qtyAvailable = qtyAvailRaw ?? qtyFound ?? 0;
 
         // Optional equipment columns, parsed by type ('' → null; bad value → row error).
@@ -666,9 +666,9 @@ export class InventoryService {
 
         // Match an existing item to update (upsert):
         //  1. by part_id when the row has one that already exists;
-        //  2. otherwise by description (name) — so re-importing without a
-        //     part_id updates the same item instead of duplicating it.
-        //     A name shared by several items is ambiguous → the row is reported.
+        //  2. otherwise by name — so re-importing without a part_id updates the
+        //     same item instead of duplicating it. A name shared by several items
+        //     is ambiguous → the row is reported.
         let existing = partId
           ? await this.db.queryOne<{ id: number }>(
               'SELECT id FROM items WHERE part_id = $1 AND deleted_at IS NULL',
@@ -678,10 +678,10 @@ export class InventoryService {
 
         if (!existing) {
           const byName = await this.db.query<{ id: number }>(
-            'SELECT id FROM items WHERE description = $1 AND deleted_at IS NULL', [description],
+            'SELECT id FROM items WHERE name = $1 AND deleted_at IS NULL', [name],
           );
           if (byName.length > 1) {
-            throw new Error(`several items are named "${description}" — set a Part ID to choose which one`);
+            throw new Error(`several items are named "${name}" — set a Part ID to choose which one`);
           }
           if (byName.length === 1) existing = byName[0];
         }
@@ -690,7 +690,7 @@ export class InventoryService {
           // Columns set directly (a blank cell clears the value), plus part_id and
           // project_id which are kept unless the row provides one (COALESCE).
           const sets = [
-            { col: 'description', val: description },
+            { col: 'name', val: name },
             { col: 'category_id', val: categoryId },
             { col: 'location_id', val: locationId },
             { col: 'sub_location', val: subLocation },
@@ -698,7 +698,7 @@ export class InventoryService {
             { col: 'qty_needed', val: qtyNeeded },
             { col: 'qty_available', val: qtyAvailable },
             { col: 'low_stock_threshold', val: threshold },
-            { col: 'notes', val: notes },
+            { col: 'description', val: description },
             ...Object.entries(extra).map(([col, val]) => ({ col, val })),
             { col: 'part_id', val: partId, coalesce: true },
             { col: 'project_id', val: projectId, coalesce: true },
@@ -715,13 +715,13 @@ export class InventoryService {
         } else {
           const cols = [
             { col: 'part_id', val: partId },
-            { col: 'description', val: description },
+            { col: 'name', val: name },
             { col: 'category_id', val: categoryId },
             { col: 'location_id', val: locationId },
             { col: 'sub_location', val: subLocation },
             { col: 'qty_found', val: qtyFound },
             { col: 'qty_needed', val: qtyNeeded },
-            { col: 'notes', val: notes },
+            { col: 'description', val: description },
             { col: 'qty_available', val: qtyAvailable },
             { col: 'low_stock_threshold', val: threshold },
             { col: 'project_id', val: projectId },
@@ -1092,7 +1092,7 @@ export class InventoryService {
   /** Transfers awaiting the given user's decision (their incoming requests). */
   async pendingTransfers(userId: number) {
     return this.db.query(
-      `SELECT t.id, t.item_id, i.description AS item, t.qty, t.notes, t.created_at,
+      `SELECT t.id, t.item_id, i.name AS item, t.qty, t.notes, t.created_at,
               u.full_name AS from_user_name
        FROM item_transactions t
        JOIN items i ON t.item_id = i.id

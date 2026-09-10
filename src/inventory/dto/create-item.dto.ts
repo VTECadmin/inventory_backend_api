@@ -3,7 +3,7 @@ import { IsBoolean, IsDateString, IsIn, IsInt, IsOptional, IsString, Min, MinLen
 export class CreateItemDto {
   @IsString()
   @MinLength(1)
-  description: string;
+  name: string;
 
   // Locations are managed data now (find-or-create by name), not a fixed set.
   @IsString()
@@ -44,9 +44,10 @@ export class CreateItemDto {
   @Min(0)
   low_stock_threshold?: number;
 
+  // Optional free-text description (shown on the item detail page).
   @IsOptional()
   @IsString()
-  notes?: string;
+  description?: string;
 
   // ── Optional equipment-registry details ──
   @IsOptional() @IsString() serial_number?: string;

@@ -4,7 +4,7 @@ export class UpdateItemDto {
   @IsOptional()
   @IsString()
   @MinLength(1)
-  description?: string;
+  name?: string;
 
   @IsOptional()
   @IsString()
@@ -45,7 +45,7 @@ export class UpdateItemDto {
 
   @IsOptional()
   @IsString()
-  notes?: string;
+  description?: string;
 
   // ── Optional equipment-registry details ──
   @IsOptional() @IsString() serial_number?: string;

@@ -23,11 +23,11 @@ export class ProjectsService {
   /** The items currently assigned to a project. */
   async items(projectId: number) {
     return this.db.query(
-      `SELECT i.id, i.description, l.name AS location
+      `SELECT i.id, i.name, l.name AS location
        FROM items i
        JOIN locations l ON i.location_id = l.id
        WHERE i.project_id = $1
-       ORDER BY i.description`,
+       ORDER BY i.name`,
       [projectId],
     );
   }

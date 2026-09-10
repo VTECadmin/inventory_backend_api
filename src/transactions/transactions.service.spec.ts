@@ -90,7 +90,7 @@ describe('TransactionsService', () => {
 
       const [sql, params] = db.query.mock.calls[0];
       expect(sql).toContain('tx.user_id = $1');
-      expect(sql).toContain('i.description ILIKE $2');
+      expect(sql).toContain('i.name ILIKE $2');
       expect(sql).toContain('tx.action = $3');
       expect(params).toEqual([3, '%laser%', 'borrow', 50, 0]);
     });

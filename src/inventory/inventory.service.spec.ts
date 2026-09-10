@@ -323,7 +323,7 @@ describe('InventoryService', () => {
     it('creates a new item from a CSV row', async () => {
       db.queryOne.mockResolvedValueOnce({ id: 3 }); // resolveLocationId → existing location
       db.query.mockResolvedValueOnce([]);           // no item with this name (byName)
-      const csv = 'description,location\nWidget,Lab 01';
+      const csv = 'name,location\nWidget,Lab 01';
 
       const res = await service.importCsv(csv, 1);
 
@@ -336,7 +336,7 @@ describe('InventoryService', () => {
         .mockResolvedValueOnce({ id: 3 })    // resolveLocationId
         .mockResolvedValueOnce({ id: 99 });  // existing item with this part_id
       db.query.mockResolvedValueOnce([]);    // UPDATE (byName is skipped when part_id matches)
-      const csv = 'part_id,description,location\nP1,Widget,Lab 01';
+      const csv = 'part_id,name,location\nP1,Widget,Lab 01';
 
       const res = await service.importCsv(csv, 1);
 
@@ -349,7 +349,7 @@ describe('InventoryService', () => {
       db.query
         .mockResolvedValueOnce([{ id: 42 }])            // byName → exactly one match
         .mockResolvedValueOnce([]);                     // UPDATE
-      const csv = 'description,location\nWidget,Lab 01';
+      const csv = 'name,location\nWidget,Lab 01';
 
       const res = await service.importCsv(csv, 1);
 
@@ -359,7 +359,7 @@ describe('InventoryService', () => {
     it('reports a row whose name matches several items (ambiguous)', async () => {
       db.queryOne.mockResolvedValueOnce({ id: 3 });        // resolveLocationId
       db.query.mockResolvedValueOnce([{ id: 1 }, { id: 2 }]); // byName → two matches
-      const csv = 'description,location\nWidget,Lab 01';
+      const csv = 'name,location\nWidget,Lab 01';
 
       const res = await service.importCsv(csv, 1);
 
@@ -368,7 +368,7 @@ describe('InventoryService', () => {
     });
 
     it('reports a row missing required fields instead of aborting', async () => {
-      const csv = 'description,location\nWidget,';  // location blank
+      const csv = 'name,location\nWidget,';  // location blank
 
       const res = await service.importCsv(csv, 1);
 
@@ -378,14 +378,14 @@ describe('InventoryService', () => {
     });
 
     it('rejects a CSV with no data rows', async () => {
-      await expect(service.importCsv('description,location', 1)).rejects.toBeInstanceOf(BadRequestException);
+      await expect(service.importCsv('name,location', 1)).rejects.toBeInstanceOf(BadRequestException);
     });
 
     it('imports equipment columns (booleans/dates parsed) into the INSERT', async () => {
       db.queryOne.mockResolvedValueOnce({ id: 3 }); // resolveLocationId
       db.query.mockResolvedValueOnce([]);           // byName → no existing item
       const csv =
-        'description,location,serial_number,calibration_required,maintenance_next,calibration_alert_value,calibration_alert_unit\n' +
+        'name,location,serial_number,calibration_required,maintenance_next,calibration_alert_value,calibration_alert_unit\n' +
         'Scope,Lab 01,SN-1,Yes,2026-01-31,30,days';
 
       const res = await service.importCsv(csv, 1);
@@ -400,7 +400,7 @@ describe('InventoryService', () => {
 
     it('reports a row with an invalid date or boolean', async () => {
       db.queryOne.mockResolvedValueOnce({ id: 3 }); // resolveLocationId
-      const csv = 'description,location,maintenance_next\nScope,Lab 01,31-01-2026'; // wrong format
+      const csv = 'name,location,maintenance_next\nScope,Lab 01,31-01-2026'; // wrong format
 
       const res = await service.importCsv(csv, 1);
 
@@ -414,7 +414,7 @@ describe('InventoryService', () => {
         .mockResolvedValueOnce({ id: 3 })   // resolveLocationId
         .mockResolvedValueOnce({ id: 8 });  // resolveProjectId → existing project
       db.query.mockResolvedValueOnce([]);   // byName → no existing item
-      const csv = 'description,location,project\nWidget,Lab 01,Alpha';
+      const csv = 'name,location,project\nWidget,Lab 01,Alpha';
 
       const res = await service.importCsv(csv, 1);
 
@@ -483,13 +483,13 @@ describe('InventoryService', () => {
   });
 
   describe('findAll (sort whitelist)', () => {
-    it('ignores an unknown / injected sort column and falls back to description', async () => {
+    it('ignores an unknown / injected sort column and falls back to name', async () => {
       db.query.mockResolvedValueOnce([]);
 
-      await service.findAll({ sort: 'name); DROP TABLE items;--', order: 'desc' });
+      await service.findAll({ sort: 'foo); DROP TABLE items;--', order: 'desc' });
 
       const sql = String(db.query.mock.calls[0][0]);
-      expect(sql).toContain('ORDER BY i.description DESC');
+      expect(sql).toContain('ORDER BY i.name DESC');
       expect(sql).not.toContain('DROP TABLE');
     });
 

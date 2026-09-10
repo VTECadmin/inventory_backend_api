@@ -11,7 +11,7 @@ export class TransactionsService {
       tx.id,
       tx.user_id,
       tx.item_id,
-      i.description AS item,
+      i.name AS item,
       u.full_name   AS "user",
       tx.action,
       tx.qty,
@@ -56,7 +56,7 @@ export class TransactionsService {
     }
     if (filters.itemSearch) {
       params.push(`%${filters.itemSearch}%`);
-      conditions.push(`i.description ILIKE $${params.length}`);
+      conditions.push(`i.name ILIKE $${params.length}`);
     }
     if (filters.action) {
       params.push(filters.action);
@@ -107,7 +107,7 @@ export class TransactionsService {
       `SELECT
          tx.id,
          tx.item_id,
-         i.description AS item,
+         i.name AS item,
          l.name AS location,
          tx.qty,
          tx.created_at AS since

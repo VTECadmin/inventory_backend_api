@@ -93,3 +93,43 @@ describe('UsersService.directory', () => {
     expect(String(db.query.mock.calls[0][0])).toContain('SELECT id, full_name FROM users');
   });
 });
+
+describe('UsersService.findAll', () => {
+  let service: UsersService;
+  let db: { query: jest.Mock; queryOne: jest.Mock };
+  let cognito: { listPoolUsers: jest.Mock };
+
+  beforeEach(async () => {
+    db = { query: jest.fn(), queryOne: jest.fn() };
+    cognito = { listPoolUsers: jest.fn() };
+    const moduleRef = await Test.createTestingModule({
+      providers: [
+        UsersService,
+        { provide: DatabaseService, useValue: db },
+        { provide: CognitoDirectoryService, useValue: cognito },
+      ],
+    }).compile();
+    service = moduleRef.get(UsersService);
+  });
+
+  it('drops orphan synthetic (@cognito.local) rows not in the pool', async () => {
+    // A real local user in the pool + a synthetic orphan not in the pool.
+    db.query.mockResolvedValueOnce([
+      { id: 1, email: 'alice@vtec.com', full_name: 'Alice', role: 'admin', cognito_sub: 's1', holdings: [] },
+      {
+        id: 2,
+        email: '33143842-abc@cognito.local',
+        full_name: '33143842-abc',
+        role: 'employee',
+        cognito_sub: '33143842-abc',
+        holdings: [],
+      },
+    ]);
+    cognito.listPoolUsers.mockResolvedValue([{ sub: 's1', email: 'alice@vtec.com', name: 'Alice', role: 'admin' }]);
+
+    const res = await service.findAll();
+
+    expect(res.map((u: any) => u.email)).toEqual(['alice@vtec.com']);
+    expect(res.some((u: any) => u.email.endsWith('@cognito.local'))).toBe(false);
+  });
+});

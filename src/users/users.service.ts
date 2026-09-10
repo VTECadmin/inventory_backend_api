@@ -89,7 +89,7 @@ export class UsersService {
       `SELECT u.id, u.email, u.full_name, u.user_role AS role, u.cognito_sub,
          COALESCE((
            SELECT json_agg(json_build_object(
-             'item_id', i.id, 'part_id', i.part_id, 'item', i.description,
+             'item_id', i.id, 'part_id', i.part_id, 'item', i.name,
              'location', l.name, 'qty', t.qty, 'since', t.created_at
            ) ORDER BY t.created_at DESC)
            FROM item_transactions t
@@ -102,10 +102,15 @@ export class UsersService {
        ORDER BY u.full_name`,
     );
 
+    // Synthetic rows provisioned from an access token (no email/name claim) get a
+    // "<sub>@cognito.local" email and the sub as their name — they are not real
+    // people, so never surface them on the Users page.
+    const isSynthetic = (email: string) => email.toLowerCase().endsWith('@cognito.local');
+
     const pool = await this.cognito.listPoolUsers();
     if (!pool) {
       // Degraded mode: only the users provisioned in the inventory.
-      return local.map(({ cognito_sub, ...u }) => u);
+      return local.filter((u) => !isSynthetic(u.email)).map(({ cognito_sub, ...u }) => u);
     }
 
     const bySub = new Map(local.filter((u) => u.cognito_sub).map((u) => [u.cognito_sub!, u]));
@@ -131,6 +136,7 @@ export class UsersService {
       const inPool =
         (u.cognito_sub && poolSubs.has(u.cognito_sub)) || poolEmails.has(u.email.toLowerCase());
       if (!inPool) {
+        if (isSynthetic(u.email)) continue; // drop orphan synthetic rows (no real identity)
         merged.push({
           id: u.id,
           email: u.email,

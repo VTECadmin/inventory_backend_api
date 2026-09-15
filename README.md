@@ -158,6 +158,11 @@ incrementing) and run `./migrate.sh <database>`. Applied migrations are recorded
 in the `schema_migrations` table and never run twice — so `setup.sh` and
 `deploy.sh` apply any pending ones automatically and safely on every run.
 
+An up-to-date entity-relationship view of the schema (generated from the
+migrations) lives in [`docs/schema.dbml`](docs/schema.dbml) — paste it into
+[dbdiagram.io](https://dbdiagram.io/d) to render or export it. Keep it in sync
+when a migration changes the schema.
+
 ## Authentication & authorization
 
 The API authenticates callers from a bearer token and authorizes them by role.

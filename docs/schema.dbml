@@ -1,0 +1,147 @@
+// =====================================================================
+// VTEC Inventory Management — relational schema
+// PostgreSQL. Generated from database/migrations/0001..0010.
+// Paste into https://dbdiagram.io/d to render / export as PDF.
+// =====================================================================
+
+Project vtec_inventory {
+  database_type: 'PostgreSQL'
+  Note: '''
+    Inventory & equipment management with role-based access control.
+    Identity is delegated to AWS Cognito; the `users` table mirrors a
+    Cognito user (keyed by `cognito_sub`) so the rest of the app can
+    reference people by a numeric id. Deletions are soft (deleted_at)
+    so historical transactions always stay valid.
+  '''
+}
+
+// ─────────────────────────────────────────
+// Enums
+// ─────────────────────────────────────────
+Enum user_role {
+  admin
+  manager
+  employee
+}
+
+Enum transaction_status {
+  active
+  returned
+  broken
+  transferred
+  pending    // a proposed transfer, awaiting the recipient
+  declined   // a transfer the recipient refused
+}
+
+Enum project_status {
+  active
+  completed
+}
+
+Enum action {
+  take
+  borrow
+  return
+  assign_to_project
+  release_from_project
+  breakdown
+  transfer
+}
+
+// ─────────────────────────────────────────
+// Tables
+// ─────────────────────────────────────────
+
+Table users {
+  id                     int          [pk, increment]
+  email                  varchar(255) [not null, unique]
+  password_hash          varchar(255) [not null, note: 'local login only (off by default)']
+  full_name              varchar(255) [not null]
+  user_role              user_role    [not null]
+  cognito_sub            varchar(255) [unique, note: 'links to the Cognito user (immutable sub)']
+  auto_accept_transfers  boolean      [not null, default: false]
+
+  Note: 'Thin mirror of a Cognito user; provisioned on first sign-in.'
+}
+
+Table categories {
+  id   int          [pk, increment]
+  name varchar(100) [not null, unique]
+}
+
+Table locations {
+  id   int          [pk, increment]
+  name varchar(255) [not null, unique]
+
+  Note: 'Managed data (add/remove from the UI), not a fixed enum. Seeded with Meeting Room, Storage Room, Lab 01-03.'
+}
+
+Table projects {
+  id         int            [pk, increment]
+  name       varchar(255)   [not null]
+  status     project_status [not null, default: 'active']
+  created_by int            [not null, ref: > users.id]
+  deleted_at timestamp      [note: 'soft-delete: hidden from the list, history kept']
+}
+
+Table items {
+  id                  int          [pk, increment]
+  part_id             varchar(100)
+  name                text         [not null, note: 'the item label (was `description` before rename 0010)']
+  category_id         int          [ref: > categories.id]
+  location_id         int          [not null, ref: > locations.id]
+  sub_location        varchar(255)
+  qty_found           int
+  qty_needed          int
+  description         text         [note: 'optional free text (was `notes` before rename 0010)']
+  qty_available       int
+  low_stock_threshold int          [note: 'flag "Low" when stock falls below this']
+  project_id          int          [ref: > projects.id]
+  deleted_at          timestamp    [note: 'soft-delete ("Retire"): hidden from list/counts/exports, history kept']
+
+  // ── Optional equipment-registry details (not all items use them) ──
+  serial_number            varchar(255)
+  manufacturer             varchar(255)
+  manufacturer_contact     text
+  owner                    varchar(255)
+  device_status            varchar(100)
+  label_printed            boolean
+  calibration_required     boolean
+  calibration_method       text
+  maintenance_next         date
+  maintenance_last         date
+  maintenance_freq_months  int
+  calibration_alert_value  int          [note: 'lead time before maintenance_next to flag "calibration due"']
+  calibration_alert_unit   varchar(10)  [note: "'days' | 'months'"]
+  service_provider         varchar(255)
+  service_provider_contact text
+  training_required        boolean
+  training_material        text
+  trainer                  varchar(255)
+  date_of_purchase         date
+  date_in_service          date
+
+  Note: 'An inventory item; optional equipment fields extend it into an equipment registry.'
+}
+
+Table item_transactions {
+  id           int                [pk, increment]
+  item_id      int                [not null, ref: > items.id]
+  user_id      int                [not null, ref: > users.id]
+  project_id   int                [ref: > projects.id]
+  action       action             [not null]
+  created_at   timestamp          [not null, default: `now()`]
+  status       transaction_status [not null, default: 'active']
+  qty          int                [not null, default: 1]
+  notes        text
+  cancelled_at timestamp          [note: 'set when the action is undone']
+  cancelled_by int                [ref: > users.id]
+  to_user_id   int                [ref: > users.id, note: 'recipient of a transfer']
+  source_tx_id int                [ref: > item_transactions.id, note: 'links borrows a transfer creates back to it (clean undo)']
+
+  Indexes {
+    item_id [name: 'idx_item_transactions_item']
+  }
+
+  Note: 'Append-only movement log (take/borrow/return/breakdown/transfer/assign/release). Also has a partial index on (item_id) WHERE action=borrow AND status=active for the "borrowed" subquery.'
+}

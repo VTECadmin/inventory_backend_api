@@ -21,7 +21,7 @@ control. Built with [NestJS](https://nestjs.com/) and PostgreSQL.
 - **Inventory** — items with quantities, locations, sub-locations, categories,
   and optional equipment-registry details (serial number, manufacturer, owner,
   calibration, maintenance, training, purchase/service dates). Extended search
-  (name, part id, category, sub-location, notes), column sorting, and pagination.
+  (name, part id, category, sub-location, description), column sorting, and pagination.
 - **Item actions** — take, borrow, return, breakdown, with partial quantities.
 - **Transfers (two-step handshake)** — the sender *proposes* a transfer; the item
   stays with them until the **recipient accepts** (or declines). Each user has an
@@ -272,15 +272,21 @@ any signed-in user; employees are scoped to their own data.
 
 ## Operations
 
-The API runs on an Ubuntu EC2 instance behind nginx:
+The API runs on an Ubuntu EC2 instance behind nginx. **Two independent instances
+share the one host** — `dev` and `prod` — each its own Node process, database and
+Cognito pool:
 
 ```
-browser ──HTTPS──▶ nginx (80/443) ──▶ Node API (127.0.0.1:3000) ──▶ PostgreSQL (localhost:5432)
+                                 ┌─▶ Node API dev  (127.0.0.1:3000) ─▶ PostgreSQL "inventory"
+browser ──HTTPS──▶ nginx (80/443)┤
+                                 └─▶ Node API prod (127.0.0.1:3001) ─▶ PostgreSQL "inventory_prod"
 ```
 
-Production host: **api-inventory.vtecdashboard.com**. The dashboard frontend
-calls the API with the user's Cognito token; the same code runs locally against
-a local database for development.
+Hosts: **dev-api-vtec-inventory.vtecdashboard.com** (dev, port 3000) and
+**api-vtec-inventory.vtecdashboard.com** (prod, port 3001). The dashboard frontend
+calls the API with the user's Cognito token; the same code runs locally against a
+local database for development. Everything is env-configurable (port, DB, Cognito
+pool, `NODE_ENV`), so one codebase serves both environments — see `.env.example`.
 
 ### First-time server setup
 
@@ -337,28 +343,34 @@ automatically on renewal.
 
 ### Deployment
 
-Once the server is set up, `./scripts/deploy.sh [git-ref]` ships a committed
-revision to the EC2 host: it exports the tree with `git archive`, installs
-dependencies, builds, runs pending migrations, and restarts the `inventory-api`
-systemd service.
+Once the server is set up, `./scripts/deploy.sh [dev|prod] [git-ref]` ships a
+committed revision to the EC2 host: it exports the tree with `git archive`,
+installs dependencies, builds, runs pending migrations, and restarts the target
+environment's systemd service. `dev` (the default) deploys to the `inventory-api`
+service; `prod` deploys to `inventory-api-prod` (its own app dir + `.env`).
+Because it uses `git archive`, only **committed** content ships — uncommitted
+local changes (e.g. any auth bypass) never reach the server.
 
 ### Service management
 
-The API runs as the `inventory-api` systemd service (auto-restart on failure,
-starts on boot). It shuts down gracefully — in-flight requests finish and the
-database pool closes before exit, so restarts and deployments drop no requests.
+Each environment runs as its own systemd service — `inventory-api` (dev) and
+`inventory-api-prod` (prod) — with auto-restart on failure and start on boot. They
+shut down gracefully — in-flight requests finish and the database pool closes
+before exit, so restarts and deployments drop no requests.
 
 ```bash
-sudo systemctl restart inventory-api     # restart (also done by deploy.sh)
-sudo systemctl status inventory-api      # current state
-journalctl -u inventory-api -f           # live logs
+sudo systemctl restart inventory-api      # dev (also done by deploy.sh dev)
+sudo systemctl restart inventory-api-prod # prod (also done by deploy.sh prod)
+sudo systemctl status inventory-api       # current state
+journalctl -u inventory-api -f            # live logs
 ```
 
 Liveness is exposed at `GET /health`, which also checks the database and returns
 `503` if it is unreachable — suitable for an uptime probe or load-balancer check:
 
 ```bash
-curl http://127.0.0.1:3000/health        # {"status":"ok","db":"up"}
+curl http://127.0.0.1:3000/health        # dev  — {"status":"ok","db":"up"}
+curl http://127.0.0.1:3001/health        # prod — {"status":"ok","db":"up"}
 ```
 
 ### Database backups

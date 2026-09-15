@@ -100,9 +100,9 @@ describe('RBAC matrix (e2e)', () => {
     it('admin → 200', () => call('admin', 'patch', `/users/${userIds.employee}/role`, { role: 'employee' }).expect(200));
   });
 
-  describe("a user's holdings — admin only (GET /transactions/holdings/:id)", () => {
+  describe("a user's holdings — admin & manager (GET /transactions/holdings/:id)", () => {
     it('admin → 200', () => call('admin', 'get', `/transactions/holdings/${userIds.employee}`).expect(200));
-    it('manager → 403', () => call('manager', 'get', `/transactions/holdings/${userIds.employee}`).expect(403));
+    it('manager → 200', () => call('manager', 'get', `/transactions/holdings/${userIds.employee}`).expect(200));
     it('employee → 403', () => call('employee', 'get', `/transactions/holdings/${userIds.employee}`).expect(403));
   });
 

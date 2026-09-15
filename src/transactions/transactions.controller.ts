@@ -43,10 +43,12 @@ export class TransactionsController {
     return this.transactionsService.myBorrows(user);
   }
 
-  // Admin only: what a given user currently holds (active borrows).
+  // What a given user currently holds (active borrows). Available to admins and
+  // managers — the same audience as the Users directory / list, which already
+  // shows the held count, so the user-details page stays consistent with it.
   @Get('holdings/:userId')
   @UseGuards(RolesGuard)
-  @Roles('admin')
+  @Roles('admin', 'manager')
   holdings(@Param('userId', ParseIntPipe) userId: number) {
     return this.transactionsService.holdingsOf(userId);
   }

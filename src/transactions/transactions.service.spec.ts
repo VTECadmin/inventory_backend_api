@@ -47,13 +47,23 @@ describe('TransactionsService', () => {
       expect(params).toEqual([]);
     });
 
-    it('combines the item filter with the employee filter', async () => {
+    it('returns the full item history even for an employee (not user-scoped)', async () => {
+      // A specific item's log is the item's whole movement history, so it is NOT
+      // restricted to the current user — the transfer/borrow chain stays complete.
       await service.findAll(employee, { itemId: 42 });
 
       const [sql, params] = db.query.mock.calls[0];
+      expect(sql).not.toContain('tx.user_id = $'); // no user-scope filter in the WHERE
+      expect(sql).toContain('tx.item_id = $1');
+      expect(params).toEqual([42]); // item only — the employee id is not applied
+    });
+
+    it('still scopes an employee to their own transactions without an item filter', async () => {
+      await service.findAll(employee, {});
+
+      const [sql, params] = db.query.mock.calls[0];
       expect(sql).toContain('tx.user_id = $1');
-      expect(sql).toContain('tx.item_id = $2');
-      expect(params).toEqual([employee.id, 42]);
+      expect(params).toEqual([employee.id]);
     });
   });
 

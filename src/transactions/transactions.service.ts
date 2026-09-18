@@ -41,14 +41,20 @@ export class TransactionsService {
   ) {
     const conditions: string[] = [];
     const params: any[] = [];
-    // RBAC: an employee only sees their own transactions; admin/manager see all
-    // and may filter by a specific person.
-    if (user.role === 'employee') {
-      params.push(user.id);
-      conditions.push(`tx.user_id = $${params.length}`);
-    } else if (filters.userId) {
-      params.push(filters.userId);
-      conditions.push(`tx.user_id = $${params.length}`);
+    // RBAC on the personal feeds (History page, recent activity): an employee only
+    // sees their own transactions; admin/manager see all and may filter by a person.
+    // A specific item's log (itemId set) is the item's full movement history — the
+    // whole borrow/transfer/return chain — so it is NOT restricted to the current
+    // user; otherwise a transfer you received shows as a lone "borrow" with the
+    // sender's side (their transferred borrow + the transfer itself) invisible.
+    if (!filters.itemId) {
+      if (user.role === 'employee') {
+        params.push(user.id);
+        conditions.push(`tx.user_id = $${params.length}`);
+      } else if (filters.userId) {
+        params.push(filters.userId);
+        conditions.push(`tx.user_id = $${params.length}`);
+      }
     }
     if (filters.itemId) {
       params.push(filters.itemId);
